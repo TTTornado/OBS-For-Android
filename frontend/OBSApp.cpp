@@ -23,6 +23,9 @@
 #include <utility/CrashHandler.hpp>
 #include <utility/OBSEventFilter.hpp>
 #include <utility/OBSProxyStyle.hpp>
+#ifdef __ANDROID__
+#include <utility/android-window-fit.hpp>
+#endif
 #if defined(_WIN32) || defined(ENABLE_SPARKLE_UPDATER)
 #include <utility/models/branches.hpp>
 #endif
@@ -1011,44 +1014,9 @@ std::vector<UpdateBranch> OBSApp::GetBranches()
  *    那种情况需要单独处理（内部套 QScrollArea，或放宽布局约束）。 */
 static void clampTopLevelToScreen(QWidget *w)
 {
-	if (!w || !w->isWindow())
-		return;
-
-	const Qt::WindowFlags f = w->windowFlags();
-	if (f.testFlag(Qt::Popup) || f.testFlag(Qt::ToolTip))
-		return;
-
-	QScreen *scr = w->screen();
-	if (!scr)
-		return;
-
-	const QRect avail = scr->availableGeometry();
-	const int margin = 8;
-	const QSize maxSize(qMax(320, avail.width() - margin * 2), qMax(240, avail.height() - margin * 2));
-
-	const QSize before = w->size();
-
-	/* 满屏窗不要压。OBSProjector::SetMonitor 在 Android 上直接
-	 * setGeometry(primaryScreen()->geometry())，尺寸与屏幕几何**完全相等**；
-	 * 压到 avail-16 再居中会在投影仪/Multiview 四周留一圈黑边。
-	 *
-	 * 判据必须用"相等"而不是"不小于"：后者会把 981x512 的设置对话框也当成满屏窗
-	 * （它宽高同样都超过 873x393），实测那样设置对话框完全不被压缩、底部按钮整行消失。 */
-	const QRect scrGeo = scr->geometry();
-	if (w->isFullScreen() || before == scrGeo.size())
-		return;
-
-	QSize target = before;
-	if (target.width() > maxSize.width())
-		target.setWidth(maxSize.width());
-	if (target.height() > maxSize.height())
-		target.setHeight(maxSize.height());
-
-	if (target == before)
-		return; // 本来就装得下，不动
-
-	w->resize(target);
-	QSize after = w->size(); // resize 可能被最小尺寸挡住，这里取实际值
+	const AndroidFitResult r = androidFitTopLevelToScreen(w);
+	if (!r.resized)
+		return; /* 尺寸已经合适（或本来就不该压），不产生任何可见动作 */
 
 	/* resize 被挡住，说明这个对话框还带着"桌面尺寸假设"（.ui 里写死的 minimumSize
 	 * 或某个子控件的 minimumHeight），需要在它的构造函数里放宽 —— 见
@@ -1061,7 +1029,7 @@ static void clampTopLevelToScreen(QWidget *w)
 	 *   ③ QLayout 算最小尺寸走 qSmartMinSize()（qlayoutengine.cpp:321-333）：
 	 *      sizePolicy 没有 ShrinkFlag 时取 max(sizeHint, minimumSizeHint)。
 	 * ②③ 都能用"在源码里放宽最小尺寸"绕开，不需要去碰这些机制。 */
-	if (after != target) {
+	if (r.actual != r.target) {
 		/* 诊断：找出最占高度的那个子控件，够定位了（不再排前 5 名）。 */
 		QString worst;
 		int worstH = 0;
@@ -1087,20 +1055,13 @@ static void clampTopLevelToScreen(QWidget *w)
 		 * 下面这行就是待办清单：出现了就说明该对话框还没做源码级修复。 */
 		obsAndroidDisplayLog(
 			"CLAMP-BLOCKED %s：目标 %dx%d 实际 %dx%d；最占高度=%s —— 该对话框需要在源码里放宽最小尺寸",
-			w->metaObject()->className(), target.width(), target.height(), after.width(),
-			after.height(), worst.toUtf8().constData());
+			w->metaObject()->className(), r.target.width(), r.target.height(), r.actual.width(),
+			r.actual.height(), worst.toUtf8().constData());
 	}
 
-	/* 装不下时别居中：居中会算出负的 y，标题栏跑出屏外、底部依旧点不到。
-	 * 改成贴左上角，至少标题栏和上半部分是可用的。 */
-	if (after.width() > avail.width() || after.height() > avail.height())
-		w->move(avail.topLeft());
-	else
-		w->move(avail.center() - QPoint(after.width() / 2, after.height() / 2));
-
 	obsAndroidDisplayLog("CLAMP %s %dx%d -> 目标 %dx%d 实际 %dx%d（可用 %dx%d）", w->metaObject()->className(),
-			     before.width(), before.height(), target.width(), target.height(), after.width(),
-			     after.height(), avail.width(), avail.height());
+			     r.before.width(), r.before.height(), r.target.width(), r.target.height(),
+			     r.actual.width(), r.actual.height(), r.avail.width(), r.avail.height());
 }
 
 /* 给对话框里的滚动区开单指滑动（QScroller）。

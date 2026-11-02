@@ -18,6 +18,9 @@
 #include "OBSBasicProperties.hpp"
 
 #include <utility/display-helpers.hpp>
+#ifdef __ANDROID__
+#include <utility/android-window-fit.hpp>
+#endif
 #include <widgets/OBSBasic.hpp>
 
 #include <properties-view.hpp>
@@ -79,6 +82,13 @@ OBSBasicProperties::OBSBasicProperties(QWidget *parent, OBSSource source_)
 	if (cx > 400 && cy > 400) {
 		resize(cx, cy);
 	}
+
+#ifdef __ANDROID__
+	/* 必须在上面那次 resize(cx, cy) **之后** —— 否则会把刚从配置里恢复的尺寸
+	 * 又覆盖回 .ui 的设计尺寸。放在 show 之前是为了避免"先大后小"闪一下
+	 * （见 android-window-fit.hpp）。 */
+	androidFitTopLevelToScreen(this);
+#endif
 
 	/* The OBSData constructor increments the reference once */
 	obs_data_release(oldSettings);

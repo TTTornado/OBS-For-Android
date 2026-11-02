@@ -21,6 +21,9 @@
 #include <components/VisibilityItemWidget.hpp>
 #include <dialogs/NameDialog.hpp>
 #include <utility/AndroidMenuPos.hpp>
+#ifdef __ANDROID__
+#include <utility/android-window-fit.hpp>
+#endif
 #include <utility/display-helpers.hpp>
 #include <utility/item-widget-helpers.hpp>
 #include <widgets/OBSBasic.hpp>
@@ -69,6 +72,9 @@ OBSBasicFilters::OBSBasicFilters(QWidget *parent, OBSSource source_)
 	 * 预览最小高同样从 150 降到 80，把高度让给滤镜列表和属性区。 */
 	ui->rightLayout->setMinimumHeight(0);
 	ui->preview->setMinimumHeight(80);
+
+	/* 尺寸在 show 之前就定好，避免"先大后小"闪一下（见 android-window-fit.hpp）。 */
+	androidFitTopLevelToScreen(this);
 #endif
 
 	ui->asyncFilters->setItemDelegate(new VisibilityItemDelegate(ui->asyncFilters));

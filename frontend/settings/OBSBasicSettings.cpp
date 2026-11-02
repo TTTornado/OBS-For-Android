@@ -28,6 +28,9 @@
 #include <docks/YouTubeAppDock.hpp>
 #endif
 #include <utility/audio-encoders.hpp>
+#ifdef __ANDROID__
+#include <utility/android-window-fit.hpp>
+#endif
 #include <utility/BaseLexer.hpp>
 #include <utility/FFmpegCodec.hpp>
 #include <utility/FFmpegFormat.hpp>
@@ -363,6 +366,9 @@ OBSBasicSettings::OBSBasicSettings(QWidget *parent)
 	 * "窗口比内容小"的不一致状态，实测会把对话框里列表的滚动和命中判定搞坏
 	 * （添加源的源列表就是这么坏的，见 OBSBasicSourceSelect 的同类改动）。 */
 	setMinimumSize(0, 0);
+
+	/* 尺寸在 show 之前就定好，避免"先大后小"闪一下（见 android-window-fit.hpp）。 */
+	androidFitTopLevelToScreen(this);
 #endif
 
 	/* clang-format off */

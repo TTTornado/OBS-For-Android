@@ -17,6 +17,9 @@
 ******************************************************************************/
 
 #include "OBSApp.hpp"
+#ifdef __ANDROID__
+#include <utility/android-window-fit.hpp>
+#endif
 #include "OBSBasicSourceSelect.hpp"
 
 #include <utility/ResizeSignaler.hpp>
@@ -257,6 +260,9 @@ OBSBasicSourceSelect::OBSBasicSourceSelect(OBSBasic *parent, undo_stack &undo_s)
 	 * 回来。两条都做，布局最小高才降到 ~192，对话框才能在 393 高的屏幕上装下。 */
 	ui->sourceTypeList->setMinimumHeight(0);
 	ui->sourceTypeList->setSizeAdjustPolicy(QAbstractScrollArea::AdjustIgnored);
+
+	/* 尺寸在 show 之前就定好，避免"先大后小"闪一下（见 android-window-fit.hpp）。 */
+	androidFitTopLevelToScreen(this);
 #endif
 
 	existingFlowLayout = ui->existingListFrame->flowLayout();
