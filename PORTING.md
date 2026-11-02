@@ -4,8 +4,8 @@
 
 本仓库是 [obsproject/obs-studio](https://github.com/obsproject/obs-studio) 的一个 fork，
 在根级布局上叠加 Android 移植（原移植工作由 [cunminF](https://github.com/cunminF/OBS_for_Android) 完成）。
-上游基线是 **33.0.0**（`72e8665`），移植改动叠在它之上，用
-`git log --oneline 33.0.0..HEAD` 看全量。
+上游基线是 **33.0.1**（`65c320b`），移植改动叠在它之上，用
+`git log --oneline 33.0.1..HEAD` 看全量。
 
 ---
 
@@ -13,7 +13,7 @@
 
 | 组件 | 版本 | 说明 |
 |---|---|---|
-| OBS 上游基线 | **33.0.0** | `cmake/common/versionconfig.cmake` 需要 |
+| OBS 上游基线 | **33.0.1** | `cmake/common/versionconfig.cmake` 需要 |
 | Android NDK | **30.0.16248370** | ubuntu-24.04 runner 自带（`ANDROID_NDK_LATEST_HOME`），无需安装 |
 | FFmpeg | **8.0.3** | OBS 33.0 要求 ≥ 8.0 |
 | Android SDK | platform **android-36**（compileSdk） | build-tools 用 runner 自带的最新版（未钉版本） |
@@ -130,8 +130,9 @@ CMake Error at libobs/cmake/obs-core-modules.cmake:4 (target_sources):
 ### 用哪个版本：**6.11.1**
 
 上游 OBS 不钉 Qt 版本号，钉的是 obs-deps 的发布批次（`CMakePresets.json` 的
-`"qt6": { "version": "2026-08-26" }`）。真正的 Qt 版本在 obs-deps 仓库的
-`deps.qt/qt6.zsh` 里，该批次对应 **Qt 6.11.1**。
+`"qt6": { "version": "2026-10-23" }`）。真正的 Qt 版本在 obs-deps 仓库的
+`deps.qt/qt6.zsh` 里，该批次对应 **Qt 6.11.1**。升级上游基线时这里要跟着看 ——
+批次变了 Qt 版本可能跟着变。
 
 上游代码的最低要求是 `>= 6.9.0`（`os-linux.cmake:15`、`os-freebsd.cmake:12`），
 但上游 CI 只测 6.11.1 —— 不要用更低版本，那是官方不覆盖的组合。

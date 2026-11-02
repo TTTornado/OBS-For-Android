@@ -58,7 +58,7 @@ env:
   # checkout 默认不取 tag，git describe 只能返回裸 SHA，会让
   # cmake/common/versionconfig.cmake 的版本解析失败。显式给定版本可绕过。
   # 升级上游基线时同步改这里（同时改 android/compile-check.sh 的默认值）。
-  OBS_VERSION_OVERRIDE: '33.0.0'
+  OBS_VERSION_OVERRIDE: '33.0.1'
 
 jobs:
   compile:
@@ -218,10 +218,10 @@ jobs:
   # 阶段 2：打可安装的 APK。
   #
   # 用 **Qt 6.11.1** —— 与上游 OBS 一致。上游不钉 Qt 版本号，钉的是 obs-deps 的
-  # 发布批次（CMakePresets.json 的 "qt6": {"version": "2026-08-26"}），真正的 Qt
+  # 发布批次（CMakePresets.json 的 "qt6": {"version": "2026-10-23"}），真正的 Qt
   # 版本在 obs-deps 仓库的 deps.qt/qt6.zsh 里：
-  #   obs-deps 2026-08-26（= 33.0.0 基线）→ Qt 6.11.1
-  #   obs-deps 2026-10-23（= 当前 master）→ Qt 6.11.1
+  #   obs-deps 2026-10-23（= 33.0.1 基线）→ Qt 6.11.1
+  # 升级上游基线时这里要跟着看 —— 批次变了 Qt 版本可能跟着变。
   # 也就是说上游一直是 6.11.1，之前用 6.9.3 是我们自己选低了（当时按移植作者的
   # README 走，没查上游的钉法）。
   #

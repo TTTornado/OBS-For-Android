@@ -60,7 +60,7 @@ echo "=================================================="
 #   if(NOT DEFINED OBS_VERSION_OVERRIDE AND EXISTS "${...}/.git")
 # 所以显式定义 OBS_VERSION_OVERRIDE 会把整段 git 逻辑跳过。
 # 升级上游基线时记得同步这个值。
-OBS_VERSION_OVERRIDE="${OBS_VERSION_OVERRIDE:-33.0.0}"
+OBS_VERSION_OVERRIDE="${OBS_VERSION_OVERRIDE:-33.0.1}"
 
 EXTRA_SDK=()
 if [ -n "${ANDROID_SDK_ROOT:-}" ]; then
