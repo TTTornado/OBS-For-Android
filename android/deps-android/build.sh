@@ -14,7 +14,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 source "$HERE/versions.sh"
 source "$HERE/defs.sh"
 
-NDK="${NDK:-$HOME/ndk/30.0.16138531}"
+NDK="${NDK:-$HOME/ndk/30.0.16248370}"
 API="${API:-29}"
 JOBS="${JOBS:-$(nproc)}"
 WORK="${WORK:-$HOME/deps-work}"

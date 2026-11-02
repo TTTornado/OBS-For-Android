@@ -14,7 +14,7 @@
 | 组件 | 版本 | 说明 |
 |---|---|---|
 | OBS 上游基线 | **33.0.0** | `cmake/common/versionconfig.cmake` 需要 |
-| Android NDK | **30.0.16138531** | sdkmanager 可装；runner 自带的 `30.0.16248370` 不是同一个 |
+| Android NDK | **30.0.16248370** | ubuntu-24.04 runner 自带（`ANDROID_NDK_LATEST_HOME`），无需安装 |
 | FFmpeg | **8.0.3** | OBS 33.0 要求 ≥ 8.0 |
 | Android SDK | platform **android-36**（compileSdk） | build-tools 用 runner 自带的最新版（未钉版本） |
 | targetSdk / minSdk | **35** / **29** | 见下方「Android 平台要求」 |
@@ -411,7 +411,8 @@ Qt 在 Android 上的逻辑像素 = dp，所以固定的 32（行高）、48（�
 - [ ] 提取 `plugins/android-common/`：uvc 与 nikon 有 6 组逐字重复（USB 枚举、采集线程
       三件套、JPEG→BGRA 整段…）。**复制已经造成过缺陷** —— nikon 漏了 uvc 已修好的 NULL 检查
 - [ ] 容器格式限制 5 处各自编码、预览面所有权 5 处各自实现 —— 收敛成单一入口
-- [ ] CI：缓存 key 不含 `NDK_VERSION`/`API`；`always()` 保存半成品 prebuilt 可能毒化缓存；
+- [ ] CI：缓存 key 已含 `NDK_VERSION`（换 NDK 会整份重建），但仍不含 `API`；
+      `always()` 保存半成品 prebuilt 可能毒化缓存；
       paths 漏了 `deps/**`；`.gitignore` 对 `android/deps-android/{prebuilt,src}` 无规则
 - [ ] 构建可重现性：x264/rnnoise 钉的是 `master` 分支且无 checksum；每次构建新生成 keystore；
       `apksigner`/`aapt2` 用 `sort -V | tail -1` 取最新
