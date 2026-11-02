@@ -62,6 +62,15 @@ OBSBasicFilters::OBSBasicFilters(QWidget *parent, OBSSource source_)
 
 	ui->setupUi(this);
 
+#ifdef __ANDROID__
+	/* 同 OBSBasicProperties：.ui 里 rightLayout 这个 QSplitter 写死了 minimumSize
+	 * 0x400，而手机横屏可用高只有 393 —— 对话框被锁在 456 高，底部按钮行出屏。
+	 * 清掉下限后最小高由子控件决定（预览 150 + 右侧容器 + 分隔条）。
+	 * 预览最小高同样从 150 降到 80，把高度让给滤镜列表和属性区。 */
+	ui->rightLayout->setMinimumHeight(0);
+	ui->preview->setMinimumHeight(80);
+#endif
+
 	ui->asyncFilters->setItemDelegate(new VisibilityItemDelegate(ui->asyncFilters));
 	ui->effectFilters->setItemDelegate(new VisibilityItemDelegate(ui->effectFilters));
 
