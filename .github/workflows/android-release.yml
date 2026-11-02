@@ -1,0 +1,53 @@
+name: Android pre-release
+
+# tag 触发（`v33.0.1-pre1` 这类）：复用 android-compile.yml 出包，再把 APK 挂到
+# GitHub Release 上，标成 pre-release。
+#
+# 为什么单独一个文件、而不是在 android-compile.yml 里加一个 job：
+# 那边的 push 触发器带 `paths` 过滤，而 paths 对 tag push 的匹配规则容易出意外
+# —— tag 指向的提交若没改到白名单里的路径，整条流水线根本不会启动，
+# 表现是"打了 tag、什么都没发生"。独立文件只按 tag 触发，不受 paths 影响。
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # 复用主 workflow：依赖编译、编译验证、打 APK 三步都在那边，这里不重复写。
+    uses: ./.github/workflows/android-compile.yml
+
+  release:
+    name: 发布 pre-release
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: OBS-Android-apk
+          path: dist
+
+      - name: 生成 sha256
+        run: |
+          set -euo pipefail
+          cd dist
+          ls -l
+          sha256sum ./*.apk | tee SHA256SUMS.txt
+
+      - name: 创建 pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --prerelease \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file .github/release-notes.md \
+            dist/*.apk dist/SHA256SUMS.txt

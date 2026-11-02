@@ -18,6 +18,8 @@ name: Android compile check
 
 on:
   workflow_dispatch:
+  # 允许 android-release.yml 复用本 workflow（tag 触发时调用，不重复写一遍构建步骤）。
+  workflow_call:
   push:
     # main = 正式分支；test/** = 试验分支。
     # 试验分支也要自动构建：不然每次都要手动 workflow_dispatch，很容易忘，
