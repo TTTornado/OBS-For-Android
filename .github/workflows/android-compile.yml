@@ -117,12 +117,17 @@ jobs:
           # 否则会把旧缓存捞回来，build.sh 看到旧 stamp 直接跳过，产物还是旧版本。
           key: deps-${{ env.ABI }}-${{ hashFiles('android/deps-android/versions.sh', 'android/deps-android/defs.sh') }}
 
+      # 缓存命中时 fetch 和 build 都可以整体跳过：prebuilt + ~/deps-work/state 都缓存了，
+      # 而后续步骤只用 prebuilt（compile-check.sh 的 PREFIX_PATH），不再需要源码。
+      # 之前 fetch 每次都跑（约 8 秒的网络检查），build 靠 stamp 秒过 —— 现在都省掉。
       - name: 下载依赖源码
+        if: steps.deps-cache.outputs.cache-hit != 'true'
         run: bash android/deps-android/fetch.sh
         env:
           OBS_PROXY: ''          # CI 直连，不走代理
 
       - name: 交叉编译依赖
+        if: steps.deps-cache.outputs.cache-hit != 'true'
         run: bash android/deps-android/build.sh "${ABI}"
         env:
           NDK: ${{ env.NDK_ROOT }}
