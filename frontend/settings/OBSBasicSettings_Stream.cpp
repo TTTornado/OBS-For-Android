@@ -517,7 +517,7 @@ void OBSBasicSettings::LoadServices(bool showAll)
 	   文件（…/.config/obs-studio/logs/），两边对起来才分得清"下拉为什么空"。02:41 实测：
 	   rtmp_common=0 不是没读到 JSON —— 插件那侧报 JSON 条目=83、协议闸门放行=0，因为注册
 	   RTMP/RTMPS 的是 obs-outputs，它要到 P-5 才进白名单。⇒ 本阶段空列表是预期中间态。 */
-	obsAndroidDisplayLog("P-2 服务列表：showAll=%d rtmp_common=%zu 下拉=%d 当前='%s' 首=%s 末=%s", (int)showAll,
+	OBS_PROBE_LOG("P-2 服务列表：showAll=%d rtmp_common=%zu 下拉=%d 当前='%s' 首=%s 末=%s", (int)showAll,
 			     services_count, ui->service->count(), ui->service->currentText().toUtf8().constData(),
 			     services_count ? obs_property_list_item_string(services, 0) : "",
 			     services_count ? obs_property_list_item_string(services, services_count - 1) : "");

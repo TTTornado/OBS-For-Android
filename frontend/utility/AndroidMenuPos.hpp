@@ -36,11 +36,11 @@ inline QPoint OBSMenuPos(const QPoint &androidGlobalPos)
 #ifdef __ANDROID__
 	if (androidGlobalPos.x() >= 0) {
 		const QPoint cursor = QCursor::pos();
-		obsAndroidDisplayLog("3-4 菜单定位：采用(%d,%d)（光标缓存在(%d,%d)，不用它）", androidGlobalPos.x(), androidGlobalPos.y(),
+		OBS_PROBE_LOG("3-4 菜单定位：采用(%d,%d)（光标缓存在(%d,%d)，不用它）", androidGlobalPos.x(), androidGlobalPos.y(),
 				     cursor.x(), cursor.y());
 		return androidGlobalPos;
 	}
-	obsAndroidDisplayLog("3-4 菜单定位：调用点没量到 ⇒ 退回光标缓存(%d,%d)", QCursor::pos().x(), QCursor::pos().y());
+	OBS_PROBE_LOG("3-4 菜单定位：调用点没量到 ⇒ 退回光标缓存(%d,%d)", QCursor::pos().x(), QCursor::pos().y());
 #else
 	Q_UNUSED(androidGlobalPos);
 #endif
@@ -55,7 +55,7 @@ inline QPoint OBSMenuPosBelow(const QWidget *anchor)
 		const QPoint pos = anchor->mapToGlobal(QPoint(0, anchor->height()));
 #ifdef __ANDROID__
 		const QString name = OBSMenuPosAnchorName(anchor);
-		obsAndroidDisplayLog("3-4 菜单定位：锚「%s」下缘 → (%d,%d)", name.toUtf8().constData(), pos.x(), pos.y());
+		OBS_PROBE_LOG("3-4 菜单定位：锚「%s」下缘 → (%d,%d)", name.toUtf8().constData(), pos.x(), pos.y());
 #endif
 		return pos;
 	}
@@ -69,7 +69,7 @@ inline QPoint OBSMenuPosCenter(const QWidget *anchor)
 		const QPoint pos = anchor->mapToGlobal(anchor->rect().center());
 #ifdef __ANDROID__
 		const QString name = OBSMenuPosAnchorName(anchor);
-		obsAndroidDisplayLog("3-4 菜单定位：锚「%s」中心 → (%d,%d)", name.toUtf8().constData(), pos.x(), pos.y());
+		OBS_PROBE_LOG("3-4 菜单定位：锚「%s」中心 → (%d,%d)", name.toUtf8().constData(), pos.x(), pos.y());
 #endif
 		return pos;
 	}

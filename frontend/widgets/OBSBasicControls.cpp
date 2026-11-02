@@ -101,7 +101,7 @@ OBSBasicControls::OBSBasicControls(OBSBasic *main) : QFrame(nullptr), ui(new Ui:
 			[sub, menuButton] {
 				const QPoint at = menuButton->mapToGlobal(QPoint(0, menuButton->height()));
 				QTimer::singleShot(0, menuButton, [sub, at] {
-					obsAndroidDisplayLog("3-4 ☰ 展开子菜单 %s（%d 项）@(%d,%d)",
+					OBS_PROBE_LOG("3-4 ☰ 展开子菜单 %s（%d 项）@(%d,%d)",
 							     sub->title().toUtf8().constData(),
 							     int(sub->actions().size()), at.x(), at.y());
 					sub->exec(at);
@@ -110,7 +110,7 @@ OBSBasicControls::OBSBasicControls(OBSBasic *main) : QFrame(nullptr), ui(new Ui:
 	}
 	menuButton->setMenu(androidMenu);
 	ui->buttonsVLayout->insertWidget(0, menuButton);
-	obsAndroidDisplayLog("3-4 ☰ 菜单入口：菜单栏 %d 项 → 镜像出 %d 个子菜单", int(barActions.size()),
+	OBS_PROBE_LOG("3-4 ☰ 菜单入口：菜单栏 %d 项 → 镜像出 %d 个子菜单", int(barActions.size()),
 			     int(androidMenu->actions().size()));
 
 	/* P-17-e 一键前后置。不塞进 ☰：手机上这是最高频的单一动作（自拍↔拍桌面来回翻），走菜单要两下。
@@ -190,7 +190,7 @@ OBSBasicControls::OBSBasicControls(OBSBasic *main) : QFrame(nullptr), ui(new Ui:
 			ui->buttonsVLayout->addLayout(row);
 		}
 		ui->buttonsVLayout->addStretch(1); // 按钮保持自然高度，别跟着 dock 一起被拉长
-		obsAndroidDisplayLog("3-4 校形：控制按钮 %d 个控件 → %d 行两列", int(order.size()),
+		OBS_PROBE_LOG("3-4 校形：控制按钮 %d 个控件 → %d 行两列", int(order.size()),
 				     (int(order.size()) + 1) / 2);
 	}
 #endif

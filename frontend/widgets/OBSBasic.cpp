@@ -1090,7 +1090,7 @@ void OBSBasic::OBSInit()
 #ifdef __ANDROID__
 	/* 判据：装了 rtmp-services 之后这条应恒为 rtmp_common/rtmp。 */
 	if (obs_service_t *svc = GetService()) {
-		obsAndroidDisplayLog("P-2 服务态：'%s' 类型=%s 协议=%s", obs_service_get_name(svc), obs_service_get_id(svc),
+		OBS_PROBE_LOG("P-2 服务态：'%s' 类型=%s 协议=%s", obs_service_get_name(svc), obs_service_get_id(svc),
 				     obs_service_get_protocol(svc));
 	}
 #endif
@@ -1324,7 +1324,7 @@ void OBSBasic::OBSInit()
 				return n;
 			};
 			const QToolButton *b = ui->scenesToolbar->findChild<QToolButton *>();
-			obsAndroidDisplayLog("3-4 命中区：落定 行高 场景=%d 源=%d 首个工具钮=%dx%d 可见动作钮 场景=%d/%d"
+			OBS_PROBE_LOG("3-4 命中区：落定 行高 场景=%d 源=%d 首个工具钮=%dx%d 可见动作钮 场景=%d/%d"
 					     " 源=%d/%d 工具栏宽=%d",
 					     ui->scenes->sizeHintForRow(0), ui->sources->sizeHintForRow(0),
 					     b ? b->width() : -1, b ? b->height() : -1,

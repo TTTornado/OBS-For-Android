@@ -12,6 +12,7 @@
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
 #include <android/log.h>
+#include <sys/system_properties.h>
 
 #include <cstdarg>
 #include <cstdio>
@@ -65,6 +66,28 @@ void obsAndroidDisplayLog(const char *fmt, ...)
 	blog(LOG_INFO, "%s: %s", kDisplayTag, buf);
 }
 
+bool obsAndroidProbeEnabled()
+{
+	/* 读一次就缓存：这个开关按设计只在"重启应用"后生效（排查时改一下再拉起，
+	 * 比每次打日志都读一次系统属性便宜得多）。 */
+	static const bool enabled = [] {
+		char value[PROP_VALUE_MAX] = {0};
+		if (__system_property_get("debug.obs.probe", value) <= 0)
+			return false;
+		switch (value[0]) {
+		case '1':
+		case 'y':
+		case 'Y':
+		case 't':
+		case 'T':
+			return true;
+		default:
+			return false;
+		}
+	}();
+	return enabled;
+}
+
 int obsAndroidDisplaySerial()
 {
 	return (int)QJniObject::callStaticMethod<jint>(kDisplayHostClass, "surfaceSerial", "()I");
@@ -77,7 +100,7 @@ bool obsAndroidDisplaySetVisible(bool visible)
 	/* Java 只在状态真的变了才动 view（幂等），所以这里每打一条就是实打实的一轮藏/露；
 	 * false 表示"没有视图可动"（还没 attach 或已 detach），不是错误 —— 例如主窗口还没
 	 * 建好预览时就有模态框弹出。 */
-	obsAndroidDisplayLog("3-3 setVisible(%s) → Java %s", visible ? "true" : "false",
+	OBS_PROBE_LOG("3-3 setVisible(%s) → Java %s", visible ? "true" : "false",
 			     ok ? "已受理" : "拒绝：没有活动视图");
 	return ok != 0;
 }
@@ -185,7 +208,7 @@ static void jniTouch(JNIEnv *, jclass, jint action, jfloat xPx, jfloat yPx)
 			 * ③ 投对了事件而 OBS 的 handler 没接。**ACTION_MOVE 不打** —— 一次拖拽就是几百行，
 			 * 会把 logcat 环形缓冲里同一轮其它探针的证据冲掉。 */
 			if (type != QEvent::MouseMove)
-				obsAndroidDisplayLog("B-5 触摸转发：%s px=(%d,%d) → 逻辑(%.0f,%.0f) 投给「%s」%s",
+				OBS_PROBE_LOG("B-5 触摸转发：%s px=(%d,%d) → 逻辑(%.0f,%.0f) 投给「%s」%s",
 						     action == 0 ? "DOWN" : (action == 1 ? "UP" : "CANCEL"), (int)xPx,
 						     (int)yPx, local.x(), local.y(), qUtf8Printable(w->objectName()),
 						     w->metaObject()->className());

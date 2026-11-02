@@ -64,6 +64,21 @@ bool obsAndroidDisplaySetVisible(bool visible);
 // blog 落的那份日志文件在应用私有目录里读不到，logcat 是设备侧唯一看得见的通道。
 void obsAndroidDisplayLog(const char *fmt, ...);
 
+// 探针日志开关，默认关。打开方式：
+//   adb shell setprop debug.obs.probe 1     # 然后重启应用（只读一次，中途改不生效）
+//   adb shell setprop debug.obs.probe 0     # 关回去
+//
+// 只有"排查某个具体交互"时才需要的那类日志走这个开关（每次触摸/每次弹菜单/每次长按都
+// 打一行的那些）。**常驻日志不走**：显示面生命周期、尺寸诊断、布局结果 —— 那些是出事
+// 之后唯一能回溯的线索，必须一直在。
+bool obsAndroidProbeEnabled();
+
+#define OBS_PROBE_LOG(...)                             \
+	do {                                           \
+		if (obsAndroidProbeEnabled())          \
+			obsAndroidDisplayLog(__VA_ARGS__); \
+	} while (0)
+
 // Java surface 事件的种类，只用于给日志标原因；取值顺序必须与 ObsDisplayHost.java 的
 // EVENT_DESTROYED/EVENT_CREATED/EVENT_CHANGED 一致。
 enum ObsAndroidSurfaceEvent {

@@ -768,12 +768,12 @@ void OBSBasic::CreateSourcePopupMenu(int idx, bool preview, const QPoint &menuGl
 
 	const QPoint menuPos = OBSMenuPos(menuGlobalPos);
 #ifdef __ANDROID__
-	obsAndroidDisplayLog("3-4 长按→右键：菜单 %d 项，exec 起于全局(%d,%d)", int(popup.actions().size()), menuPos.x(),
+	OBS_PROBE_LOG("3-4 长按→右键：菜单 %d 项，exec 起于全局(%d,%d)", int(popup.actions().size()), menuPos.x(),
 			     menuPos.y());
 #endif
 	popup.exec(menuPos);
 #ifdef __ANDROID__
-	obsAndroidDisplayLog("3-4 长按→右键：菜单 exec 已返回");
+	OBS_PROBE_LOG("3-4 长按→右键：菜单 exec 已返回");
 #endif
 }
 
@@ -807,7 +807,7 @@ void OBSBasic::on_sources_customContextMenuRequested(const QPoint &pos)
 	/* 长按→右键断在哪一格，这条就是分界线：打了 = 信号确实连到了 OBSBasic；不打 =
 	 * customContextMenuRequested 没人接（.ui 里的对象名和 on_sources_… 是自动按名字配的，
 	 * 改过名字就静默断线）。 */
-	obsAndroidDisplayLog("3-4 长按→右键：handler 收到 sources 信号 pos=(%d,%d) 场景数=%d 命中行=%d", pos.x(),
+	OBS_PROBE_LOG("3-4 长按→右键：handler 收到 sources 信号 pos=(%d,%d) 场景数=%d 命中行=%d", pos.x(),
 			     pos.y(), int(ui->scenes->count()), int(ui->sources->indexAt(pos).row()));
 #endif
 	if (ui->scenes->count()) {

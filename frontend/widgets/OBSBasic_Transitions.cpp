@@ -101,7 +101,7 @@ void OBSBasic::InitDefaultTransitions()
 	/* 必须包在 ifdef 里：obsAndroidDisplayLog 的唯一实现在 OBSAndroidDisplay.cpp，
 	 * 而那个 TU 只在 Android 下挂进目标（frontend/cmake/os-android.cmake）。
 	 * 裸调会让非 Android 构建在链接期 undefined reference。 */
-	obsAndroidDisplayLog("P-1 默认转场建成 %d 个（fade=%d cut=%d）", int(transitionUuids.size()),
+	OBS_PROBE_LOG("P-1 默认转场建成 %d 个（fade=%d cut=%d）", int(transitionUuids.size()),
 			     fadeTransition ? 1 : 0, cutTransition ? 1 : 0);
 #endif
 }
@@ -186,7 +186,7 @@ void OBSBasic::CreateDefaultQuickTransitions()
 	quickTransitions.emplace_back(fadeTransition, 300, quickTransitionIdCounter++, true);
 #ifdef __ANDROID__
 	/* P-3 回退判据：Android 曾因"obs-transitions 没进包"整段跳过，恢复后这里恒为 3 条。 */
-	obsAndroidDisplayLog("P-3 默认快捷转场 %d 条", int(quickTransitions.size()));
+	OBS_PROBE_LOG("P-3 默认快捷转场 %d 条", int(quickTransitions.size()));
 #endif
 }
 

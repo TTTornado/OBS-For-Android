@@ -14,7 +14,7 @@ void obsAndroidShowLocalPath(QWidget *parent, const QString &title, const QStrin
 
 	// 回读自证：Android 上剪贴板写入可能被平台规则挡掉，所以"已复制"这句话只在回读一致时才说。
 	const bool copied = (clipboard->text(QClipboard::Clipboard) == path);
-	obsAndroidDisplayLog("3-4 openUrl 替代：%s → %s | 剪贴板回读=%s", title.toUtf8().constData(),
+	OBS_PROBE_LOG("3-4 openUrl 替代：%s → %s | 剪贴板回读=%s", title.toUtf8().constData(),
 			     path.toUtf8().constData(), copied ? "一致" : "不一致");
 
 	OBSMessageBox::information(parent, title,
