@@ -26,9 +26,9 @@ f76a9a8 frontend: 对话框装不下时清掉窗口最小尺寸并关掉布局�
 | OBS 上游基线 | **33.0.0** | `cmake/common/versionconfig.cmake` 需要 |
 | Android NDK | **30.0.16138531** | sdkmanager 可装；runner 自带的 `30.0.16248370` 不是同一个 |
 | FFmpeg | **8.0.3** | OBS 33.0 要求 ≥ 8.0（32.2.1 时代是 7.1.3） |
-| Android SDK | platform android-35 | build-tools 用 runner 自带的最新版（未钉版本） |
+| Android SDK | platform **android-36**（compileSdk） | build-tools 用 runner 自带的最新版（未钉版本）；targetSdk 仍是 35 |
 | 目标 ABI / API | arm64-v8a / API 29 | 只做真机 |
-| Qt | **6.9.3**（Android + 桌面） | 与原作者环境一致；Android 套件从 aqt 的 `all_os` 分类装，见下方 |
+| Qt | **6.11.1**（Android + 桌面） | 跟上游（上游钉 obs-deps 批次，其 `deps.qt/qt6.zsh` 就是 6.11.1）；Android 套件从 aqt 的 `all_os` 分类装，见下方 |
 
 ---
 
@@ -39,7 +39,7 @@ f76a9a8 frontend: 对话框装不下时清掉窗口最小尺寸并关掉布局�
 - 15 个第三方依赖的交叉编译（`android/deps-android/`）
 - libobs / libobs-opengl(GLES) / 全部 `android-*` 采集插件的**编译与链接**
 - 产出 `libobs.so` 与各插件 `.so` 作为 artifact
-- **Qt 前端编译**（Qt 6.9.3）与 **APK 打包 + debug 签名**，产出可 sideload 的 APK
+- **Qt 前端编译**（Qt 6.11.1）与 **APK 打包 + debug 签名**，产出可 sideload 的 APK
 
 **不覆盖**：
 
@@ -58,24 +58,24 @@ bash android/deps-android/build.sh arm64-v8a
 NDK=$ANDROID_NDK_ROOT bash android/compile-check.sh
 
 # 3) 带前端（需要 Qt for Android + 桌面 Qt）
-ENABLE_FRONTEND=ON QT_DIR=~/Qt/6.9.3/android_arm64_v8a \
-  QT_HOST_PATH=~/Qt/6.9.3/gcc_64 \
+ENABLE_FRONTEND=ON QT_DIR=~/Qt/6.11.1/android_arm64_v8a \
+  QT_HOST_PATH=~/Qt/6.11.1/gcc_64 \
   NDK=$ANDROID_NDK_ROOT bash android/compile-check.sh
 
 # 4) 出可安装的 APK（构建 + androiddeployqt + apksigner）
-QT_DIR=~/Qt/6.9.3/android_arm64_v8a \
-  QT_HOST_PATH=~/Qt/6.9.3/gcc_64 \
+QT_DIR=~/Qt/6.11.1/android_arm64_v8a \
+  QT_HOST_PATH=~/Qt/6.11.1/gcc_64 \
   NDK=$ANDROID_NDK_ROOT ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT \
   bash android/build-apk.sh
 # 产物：OBS-Android-arm64-v8a-<mmdd-HHMM>.apk
 ```
 
-**装 Qt 6.9.3 的命令**（Android 套件不在 `linux_x64/android/`，见下节）：
+**装 Qt 6.11.1 的命令**（Android 套件不在 `linux_x64/android/`，见下节）：
 
 ```bash
 pip install aqtinstall
-aqt install-qt all_os android 6.9.3 android_arm64_v8a   # Android 套件
-aqt install-qt linux desktop 6.9.3 linux_gcc_64         # 桌面宿主（提供 androiddeployqt）
+aqt install-qt all_os android 6.11.1 android_arm64_v8a   # Android 套件
+aqt install-qt linux desktop 6.11.1 linux_gcc_64         # 桌面宿主（提供 androiddeployqt）
 ```
 
 `fetch.sh` 的代理是**可选**的：本机开发设 `OBS_PROXY=http://127.0.0.1:7892`，CI 直连留空。
@@ -128,9 +128,26 @@ CMake Error at libobs/cmake/obs-core-modules.cmake:4 (target_sources):
 
 ---
 
-## Qt 套件怎么装（6.8+ 的 Android 包在 `all_os` 分类）
+## Qt 版本与套件的获取
 
-**关键事实：Qt 6.8 起，Android 套件不在 `linux_x64/android/` 了。**
+### 用哪个版本：**6.11.1**（跟上游，不是跟移植作者）
+
+上游 OBS **不钉 Qt 版本号**，钉的是 obs-deps 的发布批次
+（`CMakePresets.json` 的 `"qt6": { "version": "2026-08-26" }`）。真正的 Qt 版本在
+obs-deps 仓库的 `deps.qt/qt6.zsh` 里：
+
+| obs-deps 批次 | 用在哪 | Qt |
+|---|---|---|
+| `2026-08-26` | **33.0.0 基线** | **6.11.1** |
+| `2026-10-23` | 当前 master | **6.11.1**（没变） |
+
+也就是说**上游一直是 6.11.1**。移植早期用 6.9.3 是照着移植作者的 README 走的、
+没查上游的钉法 —— 那是**选低了**，不是上游后来升级了。
+
+上游代码里的最低要求是 `>= 6.9.0`（`os-linux.cmake:15`、`os-freebsd.cmake:12`），
+所以 6.9.3 在"能编"的意义上合法，但**上游 CI 只测 6.11.1**，6.9.x 是官方不覆盖的组合。
+
+### 装在哪：6.8+ 的 Android 包在 `all_os` 分类
 
 | 位置 | 状态 |
 |---|---|
@@ -141,27 +158,36 @@ CMake Error at libobs/cmake/obs-core-modules.cmake:4 (target_sources):
 所以这两条命令的结果完全不同：
 
 ```bash
-aqt list-qt linux android      → 5.9.0 … 6.7.3    # 看不到 6.8+，会误判"6.9.3 拿不到"
-aqt list-qt all_os android     → … 6.9.3 … 6.12    # 真正的位置
+aqt list-qt linux android      → 5.9.0 … 6.7.3    # 看不到 6.8+，会误判"拿不到"
+aqt list-qt all_os android     → … 6.11.1 … 6.12   # 真正的位置
 ```
 
 装法：
 
 ```bash
-aqt install-qt all_os android 6.9.3 android_arm64_v8a   # Android 套件
-aqt install-qt linux desktop 6.9.3 linux_gcc_64         # 桌面宿主（提供 androiddeployqt）
+aqt install-qt all_os android 6.11.1 android_arm64_v8a   # Android 套件
+aqt install-qt linux desktop 6.11.1 linux_gcc_64         # 桌面宿主（提供 androiddeployqt）
 ```
 
 aqt 原生支持 `all_os` + `android`（`aqt/metadata.py` 里
 `TARGETS_FOR_HOST["all_os"] = ["wasm", "qt", "android"]`），目录名会拼成
-`qt6_693/qt6_693_arm64_v8a`，与服务器实际结构一致。
+`qt6_6111/qt6_6111_arm64_v8a`，与服务器实际结构一致。
 
-> ⚠️ 早期我曾据此误判"Qt 6.9.3 拿不到"，于是用 6.7.3 试编并为此打了一堆补丁。
-> 后来发现包就在 `all_os` 下，已全部切回 6.9.3（见下方"从 6.7.3 切回 6.9.3 撤掉了什么"）。
+> ⚠️ 早期曾据此误判"6.9.3 拿不到"而用 6.7.3 试编并打了一堆补丁；后来发现包就在
+> `all_os` 下。再后来才发现**版本也选低了** —— 见上表。
+
+> ⚠️ **6.9.3 → 6.11.1 是一次横切升级**：我们调过的 edge-to-edge 输入映射、
+> `QScroller` 在 item view 上的行为、`qSmartMinSize` / `sizeAdjustPolicy`、
+> 工具栏 `sizeHint` 推导、以及 AGP/Gradle 版本都可能漂移。升级后必须走一遍真机回归。
+>
+> ⚠️ 另外：本项目编译开了 **`-Werror`**，所以 Qt 每标一个 deprecated 都会变成编译错误。
+> 第一次升到 6.11.1 就撞在 `Qt::Desktop` 上（Qt 6 起是 no-op，6.11 标了 deprecated）。
+> 处理原则是**逐个修掉死代码**，不要图省事加 `-Wno-error=deprecated-declarations` ——
+> 那会把后续所有弃用一起吞掉。
 
 ---
 
-## 从 6.7.3 切回 6.9.3 撤掉了什么
+## 从 6.7.3 切回 6.9.3 撤掉了什么（历史；现在已在 6.11.1）
 
 用 6.7.3 期间打的四个补丁，切回 6.9.3 后的处置：
 
@@ -170,26 +196,35 @@ aqt 原生支持 `all_os` + `android`（`aqt/metadata.py` 里
 | `QT_ANDROID_TARGET_SDK_VERSION` 35 → 34 | ✅ **撤掉，回到 35** | 6.7.3 不支持 edge-to-edge，触摸坐标会整体偏移一个状态栏高度；6.9.3 支持 |
 | `android.aapt2FromMavenOverride` | ✅ **撤掉** | 6.7.3 的 AGP 7.4.1 太旧，解析不了新版平台 jar；6.9.3 的 AGP 够新 |
 | `InstalledPluginRow.cpp` 的 `QString::fromUtf8` | ✅ **还原成上游写法** | 6.7.3 的 `QString::arg` 没有 `std::string_view` 重载（6.8 才有）；现在该文件与上游 33.0.0 完全一致 |
-| 收敛 SDK 平台到 android-35 | ⚠️ **保留** | 纯防御：保证 compileSdk 与 targetSdk 都是 35。若碍事可删 |
+| 收敛 SDK 平台到 android-35 | ✅ **已删除** | 改成给 androiddeployqt 显式传 `--android-platform`（见下节）。Qt 6.11 起它也会读 settings 里的 `android-compile-sdk-version`，不必再靠卸平台 |
 
 代价是前端对 Qt 6.9 的编译期硬依赖只有 1 行（就是上面那条 `QString::arg`），
 说明当时用 6.7.3 其实也就差这一点——但**运行时**的 edge-to-edge 差异才是真问题。
 
 ---
 
-## APK 打包的坑（Qt 6.7.3 时代踩的，换 6.9.3 后多数已消失）
+## APK 打包的坑
 
-> 下面两条是**用 Qt 6.7.3 期间**踩的。它的 Gradle 工具链（AGP 7.4.1）太旧，
-> 和现代 Android SDK 平台不兼容。换成 Qt 6.9.3 后第 2 条已不需要（补丁已撤），
-> 第 1 条保留为防御。记录在此，以防将来又退回 6.7.x。
+### 1. 平台选择：现在显式传 `--android-platform`，不再卸平台
 
-**1. `androiddeployqt` 自己挑平台，不认 `QT_ANDROID_COMPILE_SDK_VERSION`**
-
-deployment settings 里根本没有 `android-platform` 字段，Qt 扫 SDK 目录自己挑，
+**Qt 6.7.3 时代**：`androiddeployqt` 不读 `QT_ANDROID_COMPILE_SDK_VERSION`，
+deployment settings 里也没有 `android-platform` 字段，于是它扫 SDK 目录自己挑，
 而且偏好 `*-ext*` 变体（实测依次挑到 `android-36-ext19` → `android-34-ext12`）。
-所以 workflow 里先把 36.x / 35-ext* / 34-ext* 卸掉，只留 `android-35`（= targetSdk）。
+当时的对策是把 36.x / 35-ext* / 34-ext* 全卸掉、只留一个平台 ——
+每次跑要 **79 秒**，比装 NDK（24 秒）还贵。
 
-**2. AGP 7.4.1 捆绑的 aapt2 读不了新版 `android.jar`**
+**现在**：`build-apk.sh` 给 `androiddeployqt` 显式传 `--android-platform`，
+不再依赖它自己挑。命令行参数在解析链的最前面（`main.cpp:1050-1068`：
+`--android-platform` > settings 的 `android-compile-sdk-version` > 扫目录），
+所以 runner 上装了什么平台、Qt 哪个版本、键名有没有变，都不影响结果。
+卸载平台那一步已删除。
+
+> 当前值是 **android-36** 而不是 35：Qt 6.11.1 的 Gradle 模板依赖
+> `androidx.core:core:1.17.0`，它要求 compileSdk ≥ 36，停在 35 会在
+> `:checkReleaseAarMetadata` 失败。targetSdk 仍是 35 —— compileSdk 决定
+> "能用到哪些 API"，targetSdk 决定"选择哪些运行时行为"，两者可以不同。
+
+### 2. AGP 7.4.1 捆绑的 aapt2 读不了新版 `android.jar`
 
 换哪个平台都报同一句：
 
@@ -252,8 +287,8 @@ Android 15 对 **targetSdk ≥ 35** 的应用强制 edge-to-edge：应用画到�
 **当时的权宜之计**：把 `QT_ANDROID_TARGET_SDK_VERSION` 从 35 降到 34 ——
 系统不再强制 edge-to-edge，输入与绘制重新对齐（真机验证：设置对话框能正常打开）。
 
-**最终解法**：切回 **Qt 6.9.3**，targetSdk 恢复 **35**。Qt 6.9.3 支持 edge-to-edge，
-本来就不需要这个妥协。
+**最终解法**：切回 **Qt 6.9+**（当前 **6.11.1**，与上游一致），targetSdk 恢复 **35**。
+6.9 起就支持 edge-to-edge，本来不需要这个妥协。
 
 > 备选方案（保留 targetSdk 35 且仍用 6.7.3）：在清单 `<application>` 上加
 > `android:windowOptOutEdgeToEdgeEnforcement="true"`。但它只是 Android 15 的过渡
@@ -432,6 +467,12 @@ Android layout: side=244 bottom=135 preview=648x162
 
 **未做真机功能验证**
 
+- [ ] **Qt 6.9.3 → 6.11.1 升级后的整轮回归**。这是一次横切升级，我们调过的这些东西
+      都可能漂移，逐项过一遍：
+      触摸坐标是否仍准确（`input tap` 打点比对）／单指滚动（`QScrollArea` 与
+      `QAbstractItemView` 两种路径）／对话框是否仍能一次 resize 成功（无 `CLAMP-BLOCKED`）／
+      工具栏按钮尺寸与图标是否仍对齐（`Android toolbar: button=%dx%d`）／
+      dock 比例是否仍合理（`Android layout:`）／组合框弹层是否仍正常（P-8 那条链）
 - [ ] UVC / Camera2 / 尼康 三条采集路径 —— P0 改了它们的解码缓冲、id 拷贝、传输释放，
       只做过编译验证，需要各跑一次确认没坏
 - [ ] 录制 / 推流 / 屏幕采集 / 系统内录 / 相机方向（日志里 `渲染期旋转=N°`）

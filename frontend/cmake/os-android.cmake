@@ -1,7 +1,7 @@
 # OBS CMake Android frontend platform module
 #
 # 对照 os-linux.cmake 的差别全部来自"Android 的 Qt 套件里没有这些东西"，实测依据：
-#   * Qt6DBus      —— 不存在（$Qt/6.9.3/android_*/lib/cmake/ 下只有 Concurrent/Core/Gui/
+#   * Qt6DBus      —— 不存在（$Qt/6.11.1/android_*/lib/cmake/ 下只有 Concurrent/Core/Gui/
 #                     Network/OpenGL/OpenGLWidgets/PrintSupport/Svg/SvgWidgets/Widgets/Xml），
 #                     所以 platform-x11.cpp 那份走 XDG portal 的实现整体换掉，不链 Qt::DBus。
 #   * Libpci       —— Android 没有 PCI 总线枚举，system-info 换成读系统属性的实现。
@@ -181,17 +181,28 @@ set_target_properties(
     QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/cmake/android"
     QT_ANDROID_VERSION_NAME "0.1.0"
     QT_ANDROID_VERSION_CODE 1
-    QT_ANDROID_COMPILE_SDK_VERSION 35
+    # compileSdk 必须是 36，不能是 35。
+    #
+    # Qt 6.11.1 的 Gradle 模板依赖 androidx.core:core:1.17.0，而它要求"依赖它的库和
+    # 应用必须对着 API 36 或更高编译"。compileSdk 停在 35 时 Gradle 会在
+    # :checkReleaseAarMetadata 直接失败：
+    #
+    #   Dependency 'androidx.core:core:1.17.0' requires libraries and applications
+    #   that depend on it to compile against version 36 or later of the Android APIs.
+    #
+    # 注意 compileSdk 与 targetSdk 是**两件事**：前者决定"能用到哪些 API"，
+    # 后者决定"选择哪些运行时行为"。这里 compileSdk 36 + targetSdk 35 是合法的，
+    # 而且 targetSdk 35 是我们在真机上验证过的行为（见下面的说明）。
+    QT_ANDROID_COMPILE_SDK_VERSION 36
     # targetSdk 35 在 Android 15 上会强制 edge-to-edge（窗口属性出现 EDGE_TO_EDGE_ENFORCED：
-    # 应用画到状态栏下面、内容从 y=0 开始）。这里能保持 35，是因为**用的是 Qt 6.9.3，
-    # 它支持 edge-to-edge**，输入坐标会正确换算。
+    # 应用画到状态栏下面、内容从 y=0 开始）。这里能保持 35，是因为**用的是 Qt 6.9+**
+    # （当前 6.11.1，与上游一致），它支持 edge-to-edge，输入坐标会正确换算。
     #
     # 历史坑（真机实测过，别再踩）：
-    #   曾经因为拿不到 Qt 6.9.3 而临时用 Qt 6.7.3，那个版本不支持 edge-to-edge，
+    #   曾经因为拿不到新版 Qt 而临时用 6.7.3，那个版本不支持 edge-to-edge，
     #   仍按"内容在状态栏下方"换算输入坐标 ⇒ 所有触摸被整体加上一个状态栏高度
     #   （本机实测 111 px），症状是"界面显示正常、但大部分控件点不中"，只有预览区
     #   因为面积大还能拖动。当时的权宜之计是把 targetSdk 降到 34。
-    #   现在 Android 套件可以从 aqt 的 all_os 分类装到 6.9.3，已回到 35。
     #
     # ⚠️ 若将来又退回 Qt 6.7.x，必须同步把这里改回 34，否则触摸会再次偏移。
     QT_ANDROID_TARGET_SDK_VERSION 35

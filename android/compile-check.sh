@@ -68,8 +68,8 @@ if [ -n "${ANDROID_SDK_ROOT:-}" ]; then
 fi
 
 # 前端默认关闭（不需要 Qt）。ENABLE_FRONTEND=ON 时需要：
-#   QT_DIR        Qt for Android 套件，如 ~/Qt/6.9.3/android_arm64_v8a
-#   QT_HOST_PATH  桌面套件（提供 androiddeployqt），如 ~/Qt/6.9.3/gcc_64
+#   QT_DIR        Qt for Android 套件，如 ~/Qt/6.11.1/android_arm64_v8a
+#   QT_HOST_PATH  桌面套件（提供 androiddeployqt），如 ~/Qt/6.11.1/gcc_64
 ENABLE_FRONTEND="${ENABLE_FRONTEND:-OFF}"
 PREFIX_PATH="$DEPS"
 EXTRA_FE=()

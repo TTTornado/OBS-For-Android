@@ -2,8 +2,8 @@
 # 打一个可安装的 arm64-v8a APK（需要 Qt for Android + 桌面 Qt）。
 #
 # 用法：
-#   QT_DIR=~/Qt/6.9.3/android_arm64_v8a \
-#   QT_HOST_PATH=~/Qt/6.9.3/gcc_64 \
+#   QT_DIR=~/Qt/6.11.1/android_arm64_v8a \
+#   QT_HOST_PATH=~/Qt/6.11.1/gcc_64 \
 #   NDK=$ANDROID_NDK_ROOT \
 #   android/build-apk.sh
 #
@@ -14,6 +14,7 @@
 #   NDK / ANDROID_NDK_ROOT（必须）
 #   KEYSTORE       签名用 keystore；缺省则自动生成一个 debug keystore
 #   DEPS_PREBUILT  依赖 prebuilt 目录，默认 android/deps-android/prebuilt/<abi>
+#   ANDROID_PLATFORM  androiddeployqt 用哪个 SDK 平台编译，默认 android-36
 #   ABI / API / JOBS / BUILD_DIR 同 compile-check.sh
 #
 # 产物：$ROOT/OBS-Android-<abi>-<timestamp>.apk
@@ -31,6 +32,19 @@ DEPS="${DEPS_PREBUILT:-$ROOT/android/deps-android/prebuilt/$ABI}"
 QT_DIR="${QT_DIR:-}"
 QT_HOST_PATH="${QT_HOST_PATH:-}"
 SDK="${ANDROID_SDK_ROOT:-}"
+
+# androiddeployqt 用哪个平台编译。**必须显式给**，不要让它自己扫 SDK 目录：
+#   1. 不显式指定时它会读 deployment settings 里的 android-compile-sdk-version
+#      （我们的 QT_ANDROID_COMPILE_SDK_VERSION 35 就写在那里），读不到才去扫目录；
+#      扫目录用的是反向字典序取第一个，会挑到 android-36-ext19 / android-34-ext12
+#      这类 *-ext* 变体 —— compileSdk 变成 codename 或与 targetSdk 错位。
+#   2. 即使 Qt 6.11 已经会读 settings，显式参数也比隐式链更可靠：runner 上装了什么
+#      平台、Qt 哪个版本、键名有没有变，都不影响结果。
+# 取值要与 frontend/cmake/os-android.cmake 的 QT_ANDROID_COMPILE_SDK_VERSION 一致。
+# 现在两边都是 **36**：Qt 6.11.1 的 Gradle 模板依赖 androidx.core:core:1.17.0，
+# 它要求对着 API 36 或更高编译，停在 35 会在 :checkReleaseAarMetadata 失败。
+# targetSdk 仍是 35（compileSdk 与 targetSdk 是两件事）。
+ANDROID_PLATFORM="${ANDROID_PLATFORM:-android-36}"
 
 die() { echo "FATAL: $*" >&2; exit 1; }
 
@@ -106,12 +120,14 @@ rm -rf "$AB/build/outputs/apk" \
 find "$AB/build/outputs" -name '*-signed*.apk' -delete 2>/dev/null || true
 
 echo "---- androiddeployqt（带插件重打包） ----"
+echo "     平台: $ANDROID_PLATFORM"
 ( cd "$FE" && "$QT_HOST_PATH/bin/androiddeployqt" \
 	--input "$SETTINGS" \
 	--output "$AB" \
 	--apk "$AB/obs-studio.apk" \
 	--depfile "$AB/obs-studio.d" \
 	--builddir "$FE" \
+	--android-platform "$ANDROID_PLATFORM" \
 	--release ) || die "androiddeployqt 失败（看上面日志里的 BUILD FAILED / error:）"
 
 # ---------------------------------------------------------------- 4) 签名
