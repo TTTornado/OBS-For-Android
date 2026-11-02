@@ -31,7 +31,16 @@ void OBSBasic::ResizeAndroidDocks()
 	/* Keep all five panels visible. Reserve room for the complete touch
 	 * toolbars, then share the remaining width between the bottom panels. */
 	const int toolbarWidth = qMax(ui->scenesToolbar->sizeHint().width(), ui->sourcesToolbar->sizeHint().width());
-	const int side = qMax(toolbarWidth + 8, width() * 28 / 100);
+
+	/* 左栏宽度：下界保证工具栏的 5 个按钮放得下，上界防止在宽屏上无限膨胀。
+	 *
+	 * 上界 280 沿用上游 on_resetDocks_triggered 的写法（那里是
+	 * min(width*30%, 280)）。没有它的话，1280 宽的平板上这里是 358、
+	 * 1600 宽是 448 —— 左栏随屏幕变宽一直涨，把预览挤掉。
+	 *
+	 * 手写 qMax/qMin 而不是 qBound：下界可能大于上界（工具栏特别宽时），
+	 * 那种情况应该保工具栏完整、让上限失效，而 qBound 要求 min <= max。 */
+	const int side = qMax(toolbarWidth + 8, qMin(width() * 28 / 100, 280));
 	const int rest = qMax(1, width() - side);
 	resizeDocks({ui->scenesDock, ui->sourcesDock}, {side, side}, Qt::Horizontal);
 	resizeDocks({ui->mixerDock, ui->transitionsDock, controlsDock},

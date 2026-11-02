@@ -72,11 +72,12 @@ OBSBasicProperties::OBSBasicProperties(QWidget *parent, OBSSource source_)
 	 * 清掉这个下限后，splitter 的最小高由两个子控件决定：预览 150 + 属性视图 150
 	 * + 分隔条 ≈ 305，加上按钮行 56 = 361 < 393，装得下。
 	 *
-	 * 同时把预览的最小高从 150 降到 80：393 的高度里给预览 150 的话，属性区只剩
-	 * 一百多像素，调参数很难受。80 仍然看得清画面，属性区能多出 70。用户还能拖
-	 * 分隔条自己调（childrenCollapsible=false，不会拖没）。 */
+	 * 同时把预览的最小高从 150 降下来：393 的高度里给预览 150 的话，属性区只剩
+	 * 一百多像素，调参数很难受。具体值按屏幕可用高推导（androidPreviewMinHeight，
+	 * 约可用高的 1/5，夹在 60~120），不是写死的 80。用户还能拖分隔条自己调
+	 * （childrenCollapsible=false，不会拖没）。 */
 	ui->windowSplitter->setMinimumHeight(0);
-	ui->preview->setMinimumHeight(80);
+	ui->preview->setMinimumHeight(androidPreviewMinHeight(this));
 #endif
 
 	if (cx > 400 && cy > 400) {

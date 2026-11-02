@@ -88,4 +88,18 @@ inline AndroidFitResult androidFitTopLevelToScreen(QWidget *w)
 	return r;
 }
 
+/* 对话框里内嵌预览的最小高：按屏幕可用高取 1/5，夹在 [60, 120]。
+ *
+ * 不能写死 80 —— 那是按 393 高的手机挑的：在 800 高的平板上只占 10%，
+ * 白白浪费；在 288 高的矮屏上又占 28%，属性区就没地方了。
+ * 拿不到屏幕信息时退回 80（原来的经验值）。 */
+inline int androidPreviewMinHeight(const QWidget *w)
+{
+	const QScreen *scr = w ? w->screen() : nullptr;
+	const int availH = scr ? scr->availableGeometry().height() : 0;
+	if (availH <= 0)
+		return 80;
+	return qBound(60, availH / 5, 120);
+}
+
 #endif
