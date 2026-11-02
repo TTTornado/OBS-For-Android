@@ -179,8 +179,15 @@ set_target_properties(
     # 清单与 FileProvider 的 paths 都在 cmake/android/ 下自带；一旦设了这个变量，
     # androiddeployqt 就不再拿自己的模板覆盖清单（同 android-shell 的做法）。
     QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/cmake/android"
-    QT_ANDROID_VERSION_NAME "0.1.0"
-    QT_ANDROID_VERSION_CODE 1
+    # 版本号跟上游基线走（当前 33.0.1）。
+    #
+    # versionCode 是 Android 的硬性约束：必须是**单调递增**的整数，否则系统拒绝安装更新
+    # （INSTALL_FAILED_VERSION_DOWNGRADE）。编码方案 major*10000 + minor*100 + patch：
+    #   33.0.1 -> 33*10000 + 0*100 + 1 = 330001
+    # 上限 2100000000，够用很久。升级基线时两处一起改 —— 清单里还有一份
+    # （cmake/android/AndroidManifest.xml 的 versionCode/versionName）。
+    QT_ANDROID_VERSION_NAME "33.0.1"
+    QT_ANDROID_VERSION_CODE 330001
     # compileSdk 必须是 36，不能是 35。
     #
     # Qt 6.11.1 的 Gradle 模板依赖 androidx.core:core:1.17.0，而它要求"依赖它的库和
