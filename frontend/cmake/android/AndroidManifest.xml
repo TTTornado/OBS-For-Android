@@ -16,10 +16,10 @@
 
   3-5 追加（前台保活）：FOREGROUND_SERVICE + FOREGROUND_SERVICE_SPECIAL_USE + WAKE_LOCK +
   POST_NOTIFICATIONS，以及下面那个 <service> 的 foregroundServiceType/PROPERTY_SPECIAL_USE_FGS_SUBTYPE。
-  类型选 specialUse 的理由写在 ObsForegroundService.java 头注释里（microphone 要录音权限、
-  dataSync 有 6h 上限，都不合 OBS 的长推流；原文还有一句"mediaProjection 要 token"是错的，
-  同处已更正）。四处必须成套：manifest 的类型声明与两个 FOREGROUND_SERVICE* 权限缺任何一处，
-  API 34+ 的 startForeground 直接 SecurityException。
+  类型以 specialUse 为主（dataSync 有 6h 上限，不合 OBS 的长推流）；mediaProjection 与
+  microphone 两位按实际需要或上去 —— 前者跟投影令牌走，后者跟 RECORD_AUDIO 权限走
+  （见 ObsForegroundService.promoteToForeground）。四处必须成套：manifest 的类型声明与三个
+  FOREGROUND_SERVICE* 权限缺任何一处，API 34+ 的 startForeground 直接 SecurityException。
 
   P-18-a 追加（09-07，屏幕采集授权与前台服务类型接线）三处，改一处不改另两处就是不一致：
     1) 权限多一条 FOREGROUND_SERVICE_MEDIA_PROJECTION；
@@ -69,6 +69,11 @@
          栈停在 MediaProjectionManager.getMediaProjection() —— 门在取令牌这一步，不在建 VirtualDisplay。
          原文与处置抄在 ObsProjectionHost.takeToken 上方。 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"  />
+    <!-- Android 14+ 起，后台使用麦克风必须由带 microphone 类型的前台服务持有；
+         只声明 RECORD_AUDIO 权限不够 —— 服务类型里缺这一位，切到后台系统会把录音
+         **静默**掐断（不抛异常、不写日志，用户只觉得"录着录着没声音了"）。
+         与下面 service 的 foregroundServiceType 成套，缺任何一处就是不一致。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"  />
     <uses-permission android:name="android.permission.WAKE_LOCK"  />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"  />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
@@ -105,7 +110,7 @@
         <service
             android:name="com.obsproject.studio.ObsForegroundService"
             android:exported="false"
-            android:foregroundServiceType="specialUse|mediaProjection">
+            android:foregroundServiceType="specialUse|mediaProjection|microphone">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="OBS Studio 推流/录制期间的编码与上传保活" />

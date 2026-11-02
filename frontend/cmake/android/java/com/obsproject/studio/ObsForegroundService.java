@@ -2,21 +2,22 @@
  * 前台保活宿主（plan.md §五 3-5）：推流/录制期间把进程钉在"前台服务"档，
  * 免得 HOME 切后台后被 low memory killer 回收（8.20 实测的 `has died: cch CRE`）。
  *
- * 为什么原先只有 specialUse（3-5），以及 P-18-a 为什么又加回 mediaProjection 一位：
- *   * microphone 类型要求 RECORD_AUDIO 已授予，纯录制（无音频输入）也会撞上；
- *   * dataSync 有 6h/24h 上限，长推流会被系统停掉；
+ * 类型的选择：
+ *   * dataSync 有 6h/24h 上限，长推流会被系统停掉，所以不用；
  *   * specialUse（API 34 引入）没有时长上限，只要求清单里声明类型 + FOREGROUND_SERVICE_SPECIAL_USE
- *     权限 + PROPERTY_SPECIAL_USE_FGS_SUBTYPE 说明用途 —— 正是 OBS "编码并上传/写盘" 的形态。
- *   * mediaProjection 在 3-5 时判据是"屏幕采集用不上"，那是当时的事实；P-18 立案之后不成立了。
- *     顺带把这一处按记忆写的说法改掉：我原先写"要求把 token 传进 startForeground"，后来又改成
- *     "建 VirtualDisplay 之前要有这一档" —— **两句都不对**。b109 实测：这道门在
+ *     权限 + PROPERTY_SPECIAL_USE_FGS_SUBTYPE 说明用途 —— 正是 OBS "编码并上传/写盘" 的形态，
+ *     所以它是**常驻的那一位**；
+ *   * mediaProjection 在"投影进行期间"是硬性要求。这道门在
  *     `MediaProjectionManager.getMediaProjection()` 里面（栈停在 IMediaProjection.start()），
  *     只报 specialUse 时换令牌直接 SecurityException，原文抄在 ObsProjectionHost.takeToken 上方。
- * 于是现在的口径：一个服务、两种态 —— 打算投影或握着令牌时报 specialUse|mediaProjection，
- * 都没有时 specialUse。类型跟着 ObsProjectionHost.projectionActive() 现算（**不能只看令牌**，
- * 令牌正是那一档要换来的东西，只看它会永远差一步），而"先改档、再换令牌"这个先后由
- * ensureProjectionForeground() 排；令牌散掉之后 retypeIfNeeded() 把那一位落回去。
- * 三处声明都在 cmake/android/AndroidManifest.xml，改这里不改那儿会直接 SecurityException。
+ *   * microphone 从 Android 14 起是"后台用麦克风"的硬性要求。只声明 RECORD_AUDIO 不够 ——
+ *     服务类型里缺这一位，切后台时系统会把录音**静默**掐断。它要求 RECORD_AUDIO 已授予，
+ *     所以按权限条件加（没授予就不加，否则 startForeground 直接 SecurityException）。
+ * 于是现在的口径：一个服务、按需叠类型 —— 基础 specialUse，投影态叠 mediaProjection，
+ * 有录音权限叠 microphone。投影那一位跟着 ObsProjectionHost.projectionActive() 现算
+ * （**不能只看令牌**，令牌正是那一档要换来的东西，只看它会永远差一步），而"先改档、再换令牌"
+ * 这个先后由 ensureProjectionForeground() 排；令牌散掉之后 retypeIfNeeded() 把那一位落回去。
+ * 声明都在 cmake/android/AndroidManifest.xml，改这里不改那儿会直接 SecurityException。
  *
  * 线程约定：start/stop 由 native（Qt GUI 线程）调；Service 回调跑在 Android 主线程。
  * startForegroundService() 之后系统给 5 秒宽限必须见到 startForeground()，所以 onStartCommand
@@ -226,8 +227,9 @@ public final class ObsForegroundService extends Service {
      * 类型跟着"手上有没有投影令牌"走，而不是固定一种：Android 14+ 要求**投影在进行期间**必须由
      * 一个 mediaProjection 类型的前台服务持有，而 OBS 只有这一个保活服务（开两个就是两条常驻
      * 通知）。所以：没有投影时只报 specialUse（推流/录制的原状），有令牌时把这一位或上去。
-     * 清单里那条 foregroundServiceType 必须同时声明 specialUse|mediaProjection 两个，
-     * 只改这里不改清单 = 一到录屏就 SecurityException。
+     * microphone 那一位按"有没有 RECORD_AUDIO 权限"条件加（见下面 canMic）。
+     * 清单里那条 foregroundServiceType 必须同时声明 specialUse|mediaProjection|microphone 三个，
+     * 只改这里不改清单 = 一到录屏或后台录音就 SecurityException。
      */
     private boolean promoteToForeground() {
         /* 问的是 projectionActive()（"打算投影 或 握着令牌"），不是 hasProjection()（只问令牌）：
@@ -251,7 +253,24 @@ public final class ObsForegroundService extends Service {
         int type = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE;
         if (projecting)
             type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION;
-        final String typeName = projecting ? "specialUse|mediaProjection" : "specialUse";
+        /* Android 14+ 起，后台使用麦克风必须由带 microphone 类型的前台服务持有；
+         * 只声明 RECORD_AUDIO 权限不够 —— 服务类型里缺这一位，切到后台系统会把录音
+         * **静默**掐断（不抛异常、不打日志，用户只觉得"录着录着没声音了"）。
+         *
+         * 但必须**按权限条件加**：没拿到 RECORD_AUDIO 就报这一位，startForeground 会抛
+         * SecurityException（Android 14 的硬性要求），整个保活服务起不来 ——
+         * 那比"录音断掉"严重得多。 */
+        final boolean canMic = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
+                && checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
+                        == android.content.pm.PackageManager.PERMISSION_GRANTED;
+        if (canMic)
+            type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;
+        final StringBuilder tn = new StringBuilder("specialUse");
+        if (projecting)
+            tn.append("|mediaProjection");
+        if (canMic)
+            tn.append("|microphone");
+        final String typeName = tn.toString();
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 lastPromoteType = typeName;
