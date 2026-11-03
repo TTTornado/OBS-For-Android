@@ -411,6 +411,124 @@ Qt 在 Android 上的逻辑像素 = dp，所以固定的 32（行高）、48（�
 
 ---
 
+## 构建速度
+
+apk job 冷缓存时 6.2 分钟，大头在「构建 + 打包 + 签名」。拆开看：
+
+| 阶段 | 耗时 |
+|---|---|
+| CMake configure | ~20–40s |
+| ninja 编译 453 个目标 | ~225s（冷缓存；ccache 热起来后多数变命中） |
+| Gradle 第一次（下载 gradle 发行包 + 起 daemon + packageRelease） | ~80s |
+| Gradle 第二次（带插件重打包，增量） | ~6s |
+| 其余（拷插件、签名、上传） | ~20s |
+
+### 已做
+
+**① 缓存 `~/.gradle`**
+
+托管 runner 每次全新，`gradle-9.3.1-bin.zip`（100+ MB）每轮重下一次，还要冷启动 daemon。
+workflow 用 `actions/cache` 缓存 `~/.gradle/wrapper` 和 `~/.gradle/caches`：
+实测 Gradle 第一次 **82s → 20s**。不缓存 daemon 和日志（没意义，还有并发写的风险）。
+
+**② ccache**
+
+`compile-check.sh` 在 `USE_CCACHE=1` 时挂
+`-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache`。
+按「预处理后的源码 + 编译器 + 完整编译选项」的内容哈希复用 `.o`：改选项、改头文件、
+换分支都自动失效；**只会"没命中→变慢"，不会"该编没编→产物是旧的"**。
+
+实测（同一提交重跑，热缓存）：
+
+| | 冷缓存 | 热缓存 |
+|---|---|---|
+| apk job | 6.6 min | **2.6 min** |
+| 构建 + 打包 + 签名 | 359s | **112s** |
+
+ninja 仍然是 414 次"编译"——它只看 mtime，git checkout 之后永远认为全部过期；
+但每次都是 ccache 命中，所以很快。**这正是 ccache 和 build 目录缓存的本质区别**：
+前者把"误判为需要重编"变成廉价操作，后者要靠我们自己消除误判。
+
+四个配置，缺一个就全 miss（等于没装）：
+
+| 变量 | 为什么 |
+|---|---|
+| `CCACHE_COMPILERCHECK=content` | NDK 是解压出来的，不同 runner 上 mtime 不同。默认按 **mtime** 认编译器身份 ⇒ 每轮全 miss |
+| `CCACHE_BASEDIR=$GITHUB_WORKSPACE` + `CCACHE_NOHASHDIR=true` | 绝对路径归一化，换 workspace 路径也能命中 |
+| `CCACHE_COMPRESS=true` | `.o` 带 `-g` 很大，压缩后缓存体积和上传时间都降下来 |
+| `CCACHE_MAXSIZE=3G` | 兜底，别把缓存撑爆 |
+
+缓存用 `actions/cache/restore` + `actions/cache/save` **分开**：`key` 带 `github.sha`，每轮存一份新的，
+`restore-keys` 前缀命中最近一份。用单件 `actions/cache@v4` 的话 key 固定后缓存就 immutable 了。
+
+workflow 里还有一步 `ccache -s` 把命中率打出来 —— ccache 配错时**不报错、只是变慢**，
+没有这个数字你分不清"配好了"和"根本没生效"。
+
+### 试过并放弃：直接缓存 build 目录（`build-android-apk-arm64-v8a/`）
+
+**能压到 1.1 分钟，但正确性要靠我们自己维护，所以放弃了。**
+
+它确实更快（命中后 ninja 几乎不编、连 configure 都省），但踩了三个坑：
+
+1. **恢复成功 ≠ 生效**。ninja 按 mtime 判断，`git checkout` 把源文件刷成"现在"、`.o` 是旧的
+   ⇒ 453 个目标全量重编（实测 414/414，收益 0）。要按"缓存那次构建的提交"把 mtime 调回去，
+   且 checkout 得 `fetch-depth: 0`。
+2. `pip install git-restore-mtime` 在 runner 上**装不上**（PyPI 没这个包）。
+3. 就算 mtime 修对了，**`cmake configure` 每次重跑**会重新生成 `obsconfig.h` 之类的头文件、
+   mtime 刷成"现在"，又带起 296 个重编 —— 还得补一个"CMake 输入没变就跳过 configure"。
+
+补完这三层能到 1.1 分钟，但整套逻辑的隐含前提是「`git diff` 能覆盖所有构建输入」。实际覆盖不住：
+
+* 改 `compile-check.sh` 里的 `-D` 选项、改 workflow 里的 `API` / `BUILD_TYPE` —— key 不变、
+  diff 不匹配，会**跳过 configure 静默用旧配置**；
+* `deps-android` 的 prebuilt 换了但脚本没改 —— key 里没有 deps hash，会复用旧构建目录。
+
+**这类错误不报错，只悄悄打出旧产物。** ccache 内容寻址，改 flags 自动失效，只会变慢不会变错，
+所以换成了 ccache。
+
+### 试过但回退：用 Release（`-O3`、无 `-g`）构建
+
+**结论是反的 —— 更慢，已回退。**
+
+| | RelWithDebInfo（现状） | Release |
+|---|---|---|
+| apk 构建+打包+签名 | 351s | **413s（+62s）** |
+| APK 体积 | 44.1 MB | **44.3 MB（没变）** |
+
+* 体积没变：**`-g` 的调试符号在 Gradle 打包时就已经 strip 掉了**（这也解释了为什么
+  debuggable 和非 debuggable 两个包的 `.so` 字节级相同）。想靠优化级别瘦身是徒劳的。
+* 变慢：`-O3` 比 `-O2` 编译开销大。
+
+所以 `build-apk.sh` **不传** `BUILD_TYPE`，沿用 `compile-check.sh` 的默认 `RelWithDebInfo`。
+
+### 还没做
+
+| 项 | 预期收益 | 说明 |
+|---|---|---|
+| 提高 apk job 的命中率（目前 48.67%） | 106s 还能再降 | 未查。怀疑 frontend 那批 C++ / moc 的某个输入每轮都在变（如 build number 宏）。**不影响正确性**，只是少省几秒 |
+| 合并 compile / apk 两个 job | 省一次 libobs 重复编译 | 会失去「快速失败闸门」，不划算 |
+
+### 两个 job 共用 ccache：一方向成立，另一方向**不成立**
+
+两个 job 的 ccache key **完全相同**（都不含 job 名），且配置逐字一致。但它们能互相
+提供缓存的**只有一个方向**：
+
+| 方向 | 能否命中 | 原因 |
+|---|---|---|
+| **compile job 产 → apk job 用** | ✅ 大部分能 | 两者对 libobs / 插件的编译命令完全相同（同 ABI、同 NDK、同 `-D` 选项、同 deps）。apk job 跑到 libobs 那段时直接命中 compile job 刚存的 `.o` |
+| **apk job 产 → compile job 用** | ❌ 不行 | `compile job 总是先跑`（apk job 有 `needs: compile`），同一轮里 apk 的缓存还没生成，compile 只能命中**上一轮**的；而上一轮也是同样顺序，所以 compile job 第一轮永远全 miss |
+| frontend 相关（Qt/moc/widgets） | ❌ 只有 apk job 编 | `compile-check.sh` 默认 `ENABLE_FRONTEND=OFF` 且没有 Qt，这批代码 compile job 根本不编 |
+
+所以 **compile job 自己那 26~45s 基本省不下来**（它是这条链的头部），
+价值在于**给 apk job 供血**：apk job 里 libobs + 插件那一段（414 个目标里的大头）
+可以命中 compile job 刚产出的一版。
+
+> 想让 compile job 也命中，只能给它单独一个"跨轮"key（比如不带 `github.sha`，
+> 或按源码哈希）。但它本身就是最早的环节，跨轮命中意味着省的是"改代码之前那版"的
+> 编译 —— 改过的文件照样要编，收益有限，暂不做。
+
+---
+
 ## 发布
 
 ### 流程

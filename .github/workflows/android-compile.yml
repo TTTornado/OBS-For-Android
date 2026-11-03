@@ -68,6 +68,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 240
 
+    env:
+      # 这个 job 不装 Qt，但 ccache 的 key 里要带它：key 必须与 apk job 逐字相同，
+      # 否则两个 job 各存一份、互不命中（实测过：compile 侧会变成 "-qt-"，前缀对不上，
+      # apk job 的 restore-keys 就匹配不到 compile 存的那份）。
+      QT_VERSION: '6.11.1'
+
     steps:
       - uses: actions/checkout@v4
 
@@ -158,12 +164,61 @@ jobs:
           du -sh android/deps-android/prebuilt 2>/dev/null || true
           du -sh "${HOME}/deps-work" 2>/dev/null || true
 
+      # ccache：按内容哈希复用 .o。这个 job 编 libobs + 全部插件（C/C++，无 Qt），
+      # 与 apk job 共享同一份缓存 —— 见 key 下面那段说明。
+      - name: 恢复 ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ env.ABI }}-ndk${{ env.NDK_VERSION }}-qt${{ env.QT_VERSION }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ env.ABI }}-ndk${{ env.NDK_VERSION }}-qt${{ env.QT_VERSION }}-
+
+      # key 与 apk job **完全相同**（都不含 job 名），这是刻意的：
+      #   * 这个 job 先跑（apk needs: compile），它产出的 libobs / 插件 .o 会被 apk job
+      #     的「恢复 ccache」按同一个 restore-keys 前缀命中；
+      #   * 但反过来**不成立** —— 见下面"哪些能命中"那段。
+      # 配置必须与 apk job 一字不差，否则哈希不同、同一条 .o 也不会命中。
+      # key 里也用到 env.QT_VERSION（见 job 顶部的 env）—— 本 job 不装 Qt，但 key 必须一致。
+      - name: 准备 ccache
+        run: |
+          set -euo pipefail
+          if ! command -v ccache >/dev/null 2>&1; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq ccache
+          fi
+          ccache --version | head -1
+          {
+            echo "CCACHE_DIR=$HOME/.ccache"
+            echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE"
+            echo "CCACHE_NOHASHDIR=true"
+            echo "CCACHE_COMPILERCHECK=content"
+            echo "CCACHE_MAXSIZE=3G"
+            echo "CCACHE_COMPRESS=true"
+          } >> "$GITHUB_ENV"
+
       - name: 编译验证（libobs + GLES + 全部插件，跳过 Qt）
         run: |
           set -o pipefail
-          bash android/compile-check.sh 2>&1 | tee compile.log
+          USE_CCACHE=1 bash android/compile-check.sh 2>&1 | tee compile.log
         env:
           NDK: ${{ env.NDK_ROOT }}
+
+      # 这个 job 不产 APK，所以它保存的那份缓存里只有 libobs + 插件的 .o
+      # （大概是 apk job 那份的一个子集）。用 sha 做 key，不会挤掉 apk job 的完整版：
+      # 两者 key 前缀相同但 sha 不同 —— 若顺序反过来，仍可用 restore-keys 命中。
+      - name: ccache 统计
+        if: always()
+        run: |
+          set -uo pipefail
+          if [ -d "$HOME/.ccache" ]; then du -sh "$HOME/.ccache" || true; fi
+          ccache -s || true
+
+      - name: 保存 ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ env.ABI }}-ndk${{ env.NDK_VERSION }}-qt${{ env.QT_VERSION }}-${{ github.sha }}
 
       # 归档链接产物：让"到底生成了哪些 .so、多大、符号在不在"可查，
       # 而不是只能从日志里推断。
@@ -315,6 +370,55 @@ jobs:
           ls -1 "${QT_ROOT}/${QT_VERSION}"
           echo "::endgroup::"
 
+      # Gradle 自己的缓存。托管 runner 每次都是全新环境，会把 gradle-9.3.1-bin.zip
+      # （100+ MB）重新下一遍、再冷启动 daemon —— 实测这一段 60~80 秒。
+      # 只缓存 wrapper/dists（发行包本体）和 caches（依赖解析）；
+      # 不缓存 daemon / 日志（没意义，还有并发写的风险）。
+      - name: 缓存 Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/wrapper
+            ~/.gradle/caches
+          key: gradle-${{ env.QT_VERSION }}
+          restore-keys: |
+            gradle-
+
+      # ccache：按「预处理后的源码 + 编译器 + 完整编译选项」的内容哈希缓存 .o。
+      # 与按 mtime 判断的"缓存 build 目录"不同，它是**内容寻址**的：
+      #   错了只会"没命中 → 变慢"，绝不会"该编没编 → 产物是旧的"。
+      # 改编译选项、换分支、改头文件都自动失效，不需要我们维护任何"哪些该重编"的清单。
+      #
+      # 用 restore / save 分开：key 带 github.sha，每轮存一份新的；restore-keys 前缀
+      # 命中最近的一份。用 actions/cache@v4 单件的话 key 固定后缓存就 immutable 了。
+      - name: 恢复 ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ env.ABI }}-ndk${{ env.NDK_VERSION }}-qt${{ env.QT_VERSION }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ env.ABI }}-ndk${{ env.NDK_VERSION }}-qt${{ env.QT_VERSION }}-
+
+      # ccache 的关键配置（弄错会全 miss，等于没装）：
+      #   COMPILERCHECK=content —— NDK 是解压出来的，不同 runner 上 mtime 不同；
+      #     默认按 mtime 判断编译器身份，那样每轮都全 miss。按内容判断才稳。
+      #   BASEDIR + NOHASHDIR —— 把绝对路径归一化，换个 workspace 路径也能命中。
+      - name: 准备 ccache
+        run: |
+          set -euo pipefail
+          if ! command -v ccache >/dev/null 2>&1; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq ccache
+          fi
+          ccache --version | head -1
+          {
+            echo "CCACHE_DIR=$HOME/.ccache"
+            echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE"
+            echo "CCACHE_NOHASHDIR=true"
+            echo "CCACHE_COMPILERCHECK=content"
+            echo "CCACHE_MAXSIZE=3G"
+            echo "CCACHE_COMPRESS=true"
+          } >> "$GITHUB_ENV"
+
       # 原先这里有个"用新版 aapt2 顶替 AGP 7.4.1 自带的"步骤 —— Qt 6.7.3 捆绑的
       # AGP 太旧，解析不了新版平台 android.jar 的 resources table。换成 Qt 6.9.3 后
       # 它自带的 AGP 足够新，该补丁不再需要，已移除。
@@ -329,9 +433,28 @@ jobs:
           QT_DIR="${QT_ROOT}/${QT_VERSION}/android_arm64_v8a" \
           QT_HOST_PATH="${QT_ROOT}/${QT_VERSION}/gcc_64" \
           NDK="${NDK_ROOT}" \
+          USE_CCACHE=1 \
           bash android/build-apk.sh 2>&1 | tee apk.log
         env:
           NDK: ${{ env.NDK_ROOT }}
+
+      # 把命中率打出来。ccache 配错（比如 COMPILERCHECK 用了 mtime）会**静默失效**——
+      # 编译慢但什么都不报。这里每次都能看到 cache hit，出问题一眼就知道。
+      - name: ccache 统计
+        if: always()
+        run: |
+          set -uo pipefail
+          if [ -d "$HOME/.ccache" ]; then du -sh "$HOME/.ccache" || true; fi
+          ccache -s || true
+
+      # 保存 ccache。用 always() 是为了构建失败也把已经编好的部分留下 ——
+      # ccache 是内容寻址的，半份缓存也不会污染后续结果。
+      - name: 保存 ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ env.ABI }}-ndk${{ env.NDK_VERSION }}-qt${{ env.QT_VERSION }}-${{ github.sha }}
 
       - name: 上传 APK
         if: success()

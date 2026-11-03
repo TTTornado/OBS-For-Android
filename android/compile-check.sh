@@ -85,6 +85,19 @@ else
   echo "前端 = OFF（跳过 Qt）"
 fi
 
+# ccache（可选）：USE_CCACHE=1 且系统里有 ccache 时挂上 compiler launcher。
+# 它按内容哈希复用 .o —— 改编译选项/头文件会自动失效，不存在"该编没编"的正确性风险。
+# 环境变量（CCACHE_DIR / BASEDIR / COMPILERCHECK 等）由 CI 那边给，见 workflow。
+EXTRA_CC=()
+if [ "${USE_CCACHE:-0}" = "1" ]; then
+  if command -v ccache >/dev/null 2>&1; then
+    EXTRA_CC+=("-DCMAKE_C_COMPILER_LAUNCHER=ccache" "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache")
+    echo "ccache = ON  ($(ccache --version | head -1))"
+  else
+    echo "USE_CCACHE=1 但找不到 ccache，忽略" >&2
+  fi
+fi
+
 cmake -S "$ROOT" -B "$BUILD" -G Ninja \
   -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
   -DANDROID_ABI="$ABI" \
@@ -97,6 +110,7 @@ cmake -S "$ROOT" -B "$BUILD" -G Ninja \
   -DENABLE_FRONTEND="$ENABLE_FRONTEND" \
   -DENABLE_SCRIPTING=OFF \
   -DENABLE_HEVC=ON \
+  "${EXTRA_CC[@]}" \
   "${EXTRA_FE[@]}" \
   "${EXTRA_SDK[@]}" || {
   echo "FATAL: CMake 配置失败" >&2

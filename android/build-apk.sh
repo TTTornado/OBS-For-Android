@@ -75,6 +75,7 @@ QT_HOST_PATH="$QT_HOST_PATH" \
 NDK="$NDK" \
 DEPS_PREBUILT="$DEPS" \
 ABI="$ABI" API="$API" JOBS="$JOBS" \
+USE_CCACHE="${USE_CCACHE:-0}" \
 	bash "$ROOT/android/compile-check.sh" "$BUILD" || die "前端构建失败"
 
 FE="$BUILD/frontend"
