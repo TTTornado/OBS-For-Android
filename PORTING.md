@@ -214,14 +214,44 @@ settings 的 `android-compile-sdk-version` > 扫 `platforms/` 目录。
 会挑到 `android-36-ext19` / `android-34-ext12` 这类 `*-ext*` 变体，
 compileSdk 会变成 codename 或与 targetSdk 错位。
 
-### 不要删 `android-build` 目录再重打包
+### APK 是**打两遍**包出来的，不是「解包再压回去」
 
-Qt 的 CMake 已经把 `androiddeployqt` 挂成构建目标（`[450/451] Creating APK for obs-studio`），
-但那一刻插件 `.so` 还没暂存，所以那次出的包**不含插件**。需要重打包一次带上插件；
-而重打包时 `android-build/libs/<abi>/libobs_arm64_v8a.so` 必须还在，删目录会报
-`Cannot find application binary`。
+```
+① compile-check.sh（ENABLE_FRONTEND=ON）
+      CMake 构建结束时，Qt 的 CMake 自动调 androiddeployqt
+      （日志里的 [450/451] Creating APK for obs-studio）
+      ⇒ 这一遍的包【不含我们的插件】
+② 插件暂存： rundir/lib/obs-plugins/*.so → frontend/cmake/android/libs/<abi>/
+      这个目录经 QT_ANDROID_PACKAGE_SOURCE_DIR 成为 Gradle 的 jniLibs 源
+③ 第二遍： 删掉第一遍的 APK + Gradle 的 native 中间件，再跑一次 androiddeployqt
+④ apksigner 签名
+```
 
-正确做法：保留目录、只换插件并清 Gradle 的 native 中间件（见 `android/build-apk.sh`）。
+**为什么第一遍不能带插件**：插件 `.so` 的名字不以 `lib` 开头，用不了
+`QT_ANDROID_EXTRA_LIBS`（androiddeployqt 硬性要求 `lib` 前缀），只能走 Gradle 的
+`jniLibs`；而插件是在 CMake 构建**过程中**才产出的，androiddeployqt 目标却在构建
+**末尾**才跑 —— 那一刻插件还没被拷进包源目录。
+
+**第二遍是真的重新打包**：删掉 `merged_jni_libs` / `merged_native_libs` /
+`stripped_native_libs` 三个中间件，逼 Gradle 重新执行 `packageRelease`，否则它会复用
+缓存里旧的 native 库，插件等于没加。其余 Gradle 任务仍走缓存，所以第二遍不是全量。
+
+### 两个不能碰的点
+
+**① 插件目录必须"先清空再拷"**
+
+```bash
+rm -rf "$PKG_LIBS" && mkdir -p "$PKG_LIBS"
+cp -f "$PLUG_SRC"/*.so "$PKG_LIBS"/
+```
+
+只做 `cp -f` 的话，**删掉的插件会一直留在包里**、旧 `.so` 覆盖新构建的 ——
+这种「改了没生效」最难查。
+
+**② 绝不能删 `android-build` 目录**
+
+`androiddeployqt` 重跑时需要 `android-build/libs/<abi>/libobs_arm64_v8a.so`
+（CMake 拷进去的应用库），目录一删就报 `Cannot find application binary`。
 
 ---
 
@@ -381,6 +411,111 @@ Qt 在 Android 上的逻辑像素 = dp，所以固定的 32（行高）、48（�
 
 ---
 
+## 发布
+
+### 流程
+
+```bash
+git tag v33.0.1-pre1
+git push origin v33.0.1-pre1
+```
+
+tag 推上去之后 `.github/workflows/android-release.yml` 会：
+
+1. 通过 `workflow_call` 复用 `android-compile.yml`（依赖 → 编译 → 打 APK），
+   构建步骤只有一份，不在两个文件里各写一遍
+2. 下载 APK artifact，生成 `SHA256SUMS.txt`
+3. `gh release create <tag> --prerelease`，把 APK 和校验和挂上去
+
+**为什么 release 单独一个 workflow 文件**：`android-compile.yml` 的 push 触发器带 `paths`
+过滤，而 paths 对 tag push 的匹配规则容易出意外 —— tag 指向的提交若没改到白名单里的路径，
+整条流水线根本不会启动，表现是「打了 tag、什么都没发生」。
+
+Release notes 在 `.github/release-notes.md`，改文案改那里。
+
+### 版本号
+
+两处一起改，保持一致：
+
+| 位置 | 变量 |
+|---|---|
+| `frontend/cmake/os-android.cmake` | `QT_ANDROID_VERSION_NAME` / `QT_ANDROID_VERSION_CODE` |
+| `frontend/cmake/android/AndroidManifest.xml` | `android:versionName` / `android:versionCode` |
+
+`versionCode` 编码方案 `major*10000 + minor*100 + patch`（33.0.1 → `330001`），
+必须**单调递增** —— 否则系统拒绝安装更新（`INSTALL_FAILED_VERSION_DOWNGRADE`），
+用户只能卸载重装，而卸载会丢配置和场景。
+
+### 签名：pre-release 用临时密钥，正式版必须换
+
+现在 `android/build-apk.sh` 每次构建都**现生成一个新的 debug keystore**
+（`--ks-key-alias androiddebugkey`）。pre-release 阶段可以接受，代价是
+**用户升级前必须先卸载**（签名不匹配装不上），配置会丢。
+
+**正式版之前必须换成固定的 release keystore**（存 GitHub Secrets，workflow 里解出来用）。
+否则每个版本都是「另一个应用」，用户永远无法覆盖安装。
+
+### debuggable 必须关
+
+`AndroidManifest.xml` 的 `<application>` 上不能有 `android:debuggable="true"`。
+留着的代价：包更大、运行更慢（ART 不做 AOT）、`run-as` 可用（任何人能进应用私有目录）、
+应用商店直接拒收。默认就是 false，不用显式写。
+
+---
+
+## 代码风格
+
+上游的 `.clang-format` / `.editorconfig` / `CODESTYLE.md` 全部适用，**新增代码要遵守**。
+
+### 硬性规则（可自动检查）
+
+| 规则 | 来源 | 当前状态 |
+|---|---|---|
+| 缩进用 **tab**，宽度 8 | `.editorconfig` + CODESTYLE | ✅ 全仓库一致 |
+| 行宽 ≤ **120** | `.clang-format` `ColumnLimit` | ✅ 新增文件 0 处超标 |
+| 文件末尾有换行 | `.editorconfig` `insert_final_newline` | ✅ |
+| 行尾不留空白 | `.editorconfig` `trim_trailing_whitespace` | ✅ |
+| UTF-8 | `.editorconfig` | ✅ |
+| CMake 用 2 空格 | `.editorconfig` | ✅ |
+| 类访问修饰符不缩进 | CODESTYLE | ✅ |
+| 私有成员尾下划线 | CODESTYLE | ✅ |
+
+> `.clang-format` 里那段 `IndentWidth: 4` / `UseTab: Never` 属于 `Language: ObjC`，
+> **不是 C++ 的**。C++ 走的是文件开头那段基础配置（tab / 8 / 120）。
+> 误读这一段会以为 C++ 该用 4 空格 —— 实际代码和 CODESTYLE 都是 tab。
+
+### 已知未遵守的（新代码里仍存在）
+
+**① C++ 的 if/for/while 缺大括号**
+
+CODESTYLE：「All new C++ code needs to use curly braces for all looping or branching
+statements. **No exceptions**」，`.clang-format` 也开了 `InsertBraces: true`。
+
+新增的 C++ 文件里约 60 处、`OBSApp.cpp` 的过滤器区约 22 处是单语句无括号写法。
+（`.c` 文件不受此约束 —— C 走 Linux 内核风格，允许单语句不加大括号。）
+
+**② 平台相关的 include 块**
+
+CODESTYLE 明确禁止用宏把 `#include` 包起来（原文：*"Instead of using a macro to
+conditionally compile code ... well, don't do that at all"*）。仓库里约 24 处
+`#ifdef __ANDROID__` 包着 `#include`。
+
+多数可以去掉 —— 被包含的头文件自己带 `#ifdef __ANDROID__` 守卫（例如
+`android-window-fit.hpp` 在非 Android 平台展开为空），无条件包含是安全的。
+
+**③ include 块内未按字母序**
+
+CODESTYLE 要求每个 include 块内 case-sensitive 字母序。抽查 4 个上游文件有 3 个完全有序，
+我们新增的文件里有 18 个不满足。注意 `.clang-format` 里 `SortIncludes: false`，
+clang-format **不会**自动排序，只能手动或用 `clang-format --sort-includes` 单独处理。
+
+**④ 新常量命名**
+
+CODESTYLE：新常量用 `kCamelCase`。`OBSApp.cpp` 的 `HOLD_MS` / `MOVE_SLOP`
+是从旧代码搬过来的 `UPPER_SNAKE`，按新规范应为 `kHoldMs` / `kMoveSlop`。
+
+---
+
 ## 待办
 
 ### 已知缺陷
@@ -417,3 +552,18 @@ Qt 在 Android 上的逻辑像素 = dp，所以固定的 32（行高）、48（�
       paths 漏了 `deps/**`；`.gitignore` 对 `android/deps-android/{prebuilt,src}` 无规则
 - [ ] 构建可重现性：x264/rnnoise 钉的是 `master` 分支且无 checksum；每次构建新生成 keystore；
       `apksigner`/`aapt2` 用 `sort -V | tail -1` 取最新
+
+**代码风格**（见上面「代码风格」一节，按影响排序）
+
+- [ ] C++ 的 `if`/`for`/`while` 缺大括号：约 82 处（`OBSAndroidDisplay.cpp` 18、
+      `OBSAndroidPermissions.cpp` 14、`OBSAndroidUsb.cpp` 12、`android-window-fit.hpp` 9、
+      `OBSAndroidKeepAlive.cpp` 6、`OBSApp.cpp` 过滤器区 22、其余 1）。
+      CODESTYLE 要求「no exceptions」，`.clang-format` 有 `InsertBraces: true` —— 跑一次
+      `clang-format -i` 就能修。**只作用于我们改过的文件，别碰上游文件。**
+- [ ] 平台相关 include 块：约 24 处 `#ifdef __ANDROID__` 包着 `#include`，CODESTYLE 明确禁止。
+      多数可改成无条件包含（被包含的头文件自守卫，如 `android-window-fit.hpp` 非 Android 展开为空），
+      逐个确认后再改。
+- [ ] include 块内未按字母序：18 个新增文件。`.clang-format` 的 `SortIncludes: false`
+      不会自动排序，需要手动或 `clang-format --sort-includes`。
+- [ ] 新常量命名：`OBSApp.cpp` 的 `HOLD_MS` / `MOVE_SLOP` → `kHoldMs` / `kMoveSlop`
+      （CODESTYLE 要求新常量 `kCamelCase`）
