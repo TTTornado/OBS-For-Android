@@ -508,24 +508,33 @@ workflow 里还有一步 `ccache -s` 把命中率打出来 —— ccache 配错�
 | 提高 apk job 的命中率（目前 48.67%） | 106s 还能再降 | 未查。怀疑 frontend 那批 C++ / moc 的某个输入每轮都在变（如 build number 宏）。**不影响正确性**，只是少省几秒 |
 | 合并 compile / apk 两个 job | 省一次 libobs 重复编译 | 会失去「快速失败闸门」，不划算 |
 
-### 两个 job 共用 ccache：一方向成立，另一方向**不成立**
+### 两个 job 共用 ccache：只有 apk job 保存
 
-两个 job 的 ccache key **完全相同**（都不含 job 名），且配置逐字一致。但它们能互相
-提供缓存的**只有一个方向**：
+两个 job 用**同一套 key 格式**、**逐字相同的 ccache 配置**，这样一份缓存两边都能命中。
+但**只有 apk job 保存**，compile job 只恢复不保存。
 
-| 方向 | 能否命中 | 原因 |
+原因是踩过一个坑：key 里带 `github.sha`，同一轮提交两个 job 算出来的 key **完全相同**，
+后保存的会被拒绝：
+
+```
+Failed to save: Unable to reserve cache with key ..., another job may be creating this cache.
+```
+
+实测是 compile job 先赢（它先跑），于是 apk job 那 414 个 frontend `.o` **从来没进过缓存**，
+缓存永远停在只有 libobs/插件的那一小份 —— 最终 apk job 命中率只剩 33%，比不共享还差。
+
+现在的分工：
+
+| | 恢复 | 保存 |
 |---|---|---|
-| **compile job 产 → apk job 用** | ✅ 大部分能 | 两者对 libobs / 插件的编译命令完全相同（同 ABI、同 NDK、同 `-D` 选项、同 deps）。apk job 跑到 libobs 那段时直接命中 compile job 刚存的 `.o` |
-| **apk job 产 → compile job 用** | ❌ 不行 | `compile job 总是先跑`（apk job 有 `needs: compile`），同一轮里 apk 的缓存还没生成，compile 只能命中**上一轮**的；而上一轮也是同样顺序，所以 compile job 第一轮永远全 miss |
-| frontend 相关（Qt/moc/widgets） | ❌ 只有 apk job 编 | `compile-check.sh` 默认 `ENABLE_FRONTEND=OFF` 且没有 Qt，这批代码 compile job 根本不编 |
+| compile job（先跑，只编 libobs + 插件） | ✅ 拿上一轮的完整缓存 | ❌ |
+| apk job（后跑，编的是超集） | ✅ 先拿上一轮的完整缓存 | ✅ 唯一写入方 |
 
-所以 **compile job 自己那 26~45s 基本省不下来**（它是这条链的头部），
-价值在于**给 apk job 供血**：apk job 里 libobs + 插件那一段（414 个目标里的大头）
-可以命中 compile job 刚产出的一版。
+这样两个 job 都能吃到"上一轮的完整缓存"，谁都不抢 key。代价是：如果 apk job 失败，
+这一轮就不更新缓存（`if: always()` 已尽量缓解）。
 
-> 想让 compile job 也命中，只能给它单独一个"跨轮"key（比如不带 `github.sha`，
-> 或按源码哈希）。但它本身就是最早的环节，跨轮命中意味着省的是"改代码之前那版"的
-> 编译 —— 改过的文件照样要编，收益有限，暂不做。
+> 别给它俩各配一个带 job 名的 key —— 那样两边都会存，但 `restore-keys` 只能挑"最近生成的
+> 一份"，结果 apk job 反而可能拿到 compile 那份小缓存。单一写入方更简单也更准。
 
 ---
 

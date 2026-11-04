@@ -164,8 +164,16 @@ jobs:
           du -sh android/deps-android/prebuilt 2>/dev/null || true
           du -sh "${HOME}/deps-work" 2>/dev/null || true
 
-      # ccache：按内容哈希复用 .o。这个 job 编 libobs + 全部插件（C/C++，无 Qt），
-      # 与 apk job 共享同一份缓存 —— 见 key 下面那段说明。
+      # ccache：按内容哈希复用 .o。这个 job 编 libobs + 全部插件（C/C++，无 Qt）。
+      #
+      # **本 job 只恢复、不保存。** 踩过坑：两个 job 的 key 完全相同（key 里带
+      # github.sha，同一轮提交两边算出来一模一样），后保存的会被拒绝 ——
+      #   Failed to save: Unable to reserve cache with key ..., another job may be creating this cache.
+      # 实测是 compile job 先赢，于是 apk job 那 414 个 frontend .o 从来没进过缓存，
+      # 缓存永远停在只有 libobs/插件的那一小份。
+      #
+      # 现在唯一写入方是 apk job（它编的是超集）。compile job 用同一个 restore-keys
+      # 前缀拿上一轮的完整缓存，命中率比"自己存一小份"更高。
       - name: 恢复 ccache
         uses: actions/cache/restore@v4
         with:
@@ -174,12 +182,8 @@ jobs:
           restore-keys: |
             ccache-${{ env.ABI }}-ndk${{ env.NDK_VERSION }}-qt${{ env.QT_VERSION }}-
 
-      # key 与 apk job **完全相同**（都不含 job 名），这是刻意的：
-      #   * 这个 job 先跑（apk needs: compile），它产出的 libobs / 插件 .o 会被 apk job
-      #     的「恢复 ccache」按同一个 restore-keys 前缀命中；
-      #   * 但反过来**不成立** —— 见下面"哪些能命中"那段。
       # 配置必须与 apk job 一字不差，否则哈希不同、同一条 .o 也不会命中。
-      # key 里也用到 env.QT_VERSION（见 job 顶部的 env）—— 本 job 不装 Qt，但 key 必须一致。
+      # key 里用到的 env.QT_VERSION 见 job 顶部的 env（本 job 不装 Qt，但 key 必须一致）。
       - name: 准备 ccache
         run: |
           set -euo pipefail
@@ -203,22 +207,14 @@ jobs:
         env:
           NDK: ${{ env.NDK_ROOT }}
 
-      # 这个 job 不产 APK，所以它保存的那份缓存里只有 libobs + 插件的 .o
-      # （大概是 apk job 那份的一个子集）。用 sha 做 key，不会挤掉 apk job 的完整版：
-      # 两者 key 前缀相同但 sha 不同 —— 若顺序反过来，仍可用 restore-keys 命中。
+      # 这里**故意不保存** —— 见上面「恢复 ccache」那段：两个 job 同 key 会互相抢，
+      # 让 apk job 的 414 个 frontend .o 永远存不进去。缓存的唯一写入方是 apk job。
       - name: ccache 统计
         if: always()
         run: |
           set -uo pipefail
           if [ -d "$HOME/.ccache" ]; then du -sh "$HOME/.ccache" || true; fi
           ccache -s || true
-
-      - name: 保存 ccache
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: ~/.ccache
-          key: ccache-${{ env.ABI }}-ndk${{ env.NDK_VERSION }}-qt${{ env.QT_VERSION }}-${{ github.sha }}
 
       # 归档链接产物：让"到底生成了哪些 .so、多大、符号在不在"可查，
       # 而不是只能从日志里推断。
