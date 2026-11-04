@@ -221,37 +221,90 @@ compileSdk 会变成 codename 或与 targetSdk 错位。
       CMake 构建结束时，Qt 的 CMake 自动调 androiddeployqt
       （日志里的 [450/451] Creating APK for obs-studio）
       ⇒ 这一遍的包【不含我们的插件】
-② 插件暂存： rundir/lib/obs-plugins/*.so → frontend/cmake/android/libs/<abi>/
-      这个目录经 QT_ANDROID_PACKAGE_SOURCE_DIR 成为 Gradle 的 jniLibs 源
-③ 第二遍： 删掉第一遍的 APK + Gradle 的 native 中间件，再跑一次 androiddeployqt
+② 插件暂存： rundir/lib/obs-plugins/*.so → frontend/cmake/android/assets/obs-plugins/
+             （同时生成 MANIFEST 清单）
+③ 第二遍： 删掉第一遍的 APK 和 Gradle 产物，再跑一次 androiddeployqt，让 assets 进包
 ④ apksigner 签名
 ```
 
-**为什么第一遍不能带插件**：插件 `.so` 的名字不以 `lib` 开头，用不了
-`QT_ANDROID_EXTRA_LIBS`（androiddeployqt 硬性要求 `lib` 前缀），只能走 Gradle 的
-`jniLibs`；而插件是在 CMake 构建**过程中**才产出的，androiddeployqt 目标却在构建
-**末尾**才跑 —— 那一刻插件还没被拷进包源目录。
+**为什么第一遍不能带插件**：插件是 CMake 构建**过程中**才产出的，而 androiddeployqt 目标在
+构建**末尾**才跑 —— 那一刻 assets 目录还是空的。所以需要第二遍。
 
-**第二遍是真的重新打包**：删掉 `merged_jni_libs` / `merged_native_libs` /
-`stripped_native_libs` 三个中间件，逼 Gradle 重新执行 `packageRelease`，否则它会复用
-缓存里旧的 native 库，插件等于没加。其余 Gradle 任务仍走缓存，所以第二遍不是全量。
+**第二遍是真的重新打包**：删掉 `build/outputs/apk` 和 Gradle 的 native 中间件，逼 Gradle
+重新执行 `packageRelease`。其余 Gradle 任务仍走缓存，所以第二遍不是全量。
 
 ### 两个不能碰的点
 
-**① 插件目录必须"先清空再拷"**
+**① assets 目录必须"先清空再拷"**
 
 ```bash
-rm -rf "$PKG_LIBS" && mkdir -p "$PKG_LIBS"
-cp -f "$PLUG_SRC"/*.so "$PKG_LIBS"/
+rm -rf "$PKG_ASSETS" && mkdir -p "$PKG_ASSETS"
 ```
 
-只做 `cp -f` 的话，**删掉的插件会一直留在包里**、旧 `.so` 覆盖新构建的 ——
-这种「改了没生效」最难查。
+只做 `cp -f` 的话，**删掉的插件会一直留在包里**、旧 `.so` 覆盖新构建的 —— 这种「改了没生效」最难查。
 
 **② 绝不能删 `android-build` 目录**
 
 `androiddeployqt` 重跑时需要 `android-build/libs/<abi>/libobs_arm64_v8a.so`
 （CMake 拷进去的应用库），目录一删就报 `Cannot find application binary`。
+
+---
+
+## 插件分发与加载
+
+### 为什么插件不进 APK 的 `lib/<abi>/`
+
+非 debuggable 包安装时，系统**只把 `lib*.so` 解到 `nativeLibraryDir`**。我们的插件叫
+`obs-x264.so` / `android-camera.so`（OBS 插件惯例：名字不带 `lib` 前缀），一个都解不出来
+—— 实测 34 个 `.so` 只解出 20 个，正好是那 20 个 `lib*` 的。这就是之前非 debuggable 包
+「14 个插件全部 `dlopen not found`」的根因；debuggable 包会全量解出，所以这个问题一直被掩盖。
+
+> 曾怀疑是 Android 10+ 的 W^X 拦住了「从私有目录 dlopen」。**实测否证**：那条限制针对
+> `execve`（执行程序），不拦 `dlopen`；从私有目录 dlopen 成功，`os_glob` 也能正常扫。
+
+### 现在的链路
+
+```
+APK: assets/obs-plugins/*.so + MANIFEST      （保留原文件名，APK 照常压缩）
+  ↓ 装载前（QApplication 之后）EnsureAndroidPluginBinaries()
+$OBS_ROOT_PATH/lib/*.so                      （解压到应用私有目录）
+  ↓ obs_load_plugins() → os_glob()
+与 Linux/BSD 完全相同的「扫目录」装载
+```
+
+两个关键点：
+
+* **解压必须晚于 QApplication**：Qt 的 `assets:` 文件引擎是平台插件初始化时注册的，而
+  `PrepareAndroidRuntimePaths()` 跑在 `main()` 最前面（QApplication 之前），那时 `assets:`
+  不可用。所以由 loader 在装载前调 `EnsureAndroidPluginBinaries()`（幂等，只成功才置位）。
+* **装载器不再用编译期白名单**：就是 `obs_load_plugins()` + `os_glob($ROOT/lib/*.so)`。
+  路径由 `libobs/obs-android.c` 的 `add_default_module_paths()` 注册，模板与桌面一致：
+  `bin=$ROOT/lib`、`data=$ROOT/share/obs/obs-plugins/%module%`。
+
+### 按需加载：`$ROOT/lib` 也是用户能写的地方
+
+两条规矩（见 `extractPluginBinaries()`）：
+
+1. **只动自己登记过的文件**。解压时把本版清单写进 `.managed`；下次只删「上版登记过、本版
+   没有」的文件。用户自己放进去的 `.so` 从来不在 `.managed` 里，永远不会被碰。
+2. **版本标记 `.bundle-stamp`**。存 MANIFEST 内容的 SHA1（不是版本号 —— 插件集合一变标记
+   就变）；标记一致且登记的文件都在就跳过解压。
+
+于是：往 `$ROOT/lib` 放一个 `.so` 就能装插件、删掉就卸载，不需要重新打包。
+
+### 三个容易踩的构建坑（都已修）
+
+* **前端应用库被当成插件**。`cmake/android/helpers.cmake` 原来靠 Qt 内部属性
+  `_qt_is_android_executable` 判断"这是前端不是插件"，Qt 6.11.1 里该属性失效 ⇒ 前端库被
+  拷进 `rundir/lib/obs-plugins/`（99 MB）并被追加进 `OBS_MODULES_ENABLED`。
+  现在再加一条**按目标身份**的判断：`if(_is_qt_android_app OR target STREQUAL obs-studio)`。
+  （没被发现是因为 `os-android.cmake` 在 `frontend/CMakeLists.txt:105` 就把
+  `OBS_MODULES_ENABLED` 读去生成头文件了，而 `obs-studio` 在 `:159` 才进 helpers。）
+* **`assets` 不经过 Gradle 的 strip**。`rundir` 里的 `.so` 带 `-g`，直接收进 assets 会比
+  原来大一圈；`build-apk.sh` 用 NDK 的 `llvm-strip --strip-unneeded` 补这一步。
+* **`lib/obs-plugins/` 的不变式**。打包时**不做文件名过滤** —— "lib 前缀就排除"会把未来
+  一个叫 `libfoo.so` 的合法插件静默漏掉。改成写入前**断言**该目录里没有 `libobs_*` /
+  `libQt*`：不变式被破坏时直接 `die`，而不是悄悄出错。
 
 ---
 
@@ -647,20 +700,11 @@ CODESTYLE：新常量用 `kCamelCase`。`OBSApp.cpp` 的 `HOLD_MS` / `MOVE_SLOP`
 
 ### 已知缺陷
 
-- [ ] **【发版阻塞】非 debuggable 包里 14 个插件全部加载失败**（`rc=-2`，
-      `dlopen failed: library "obs-x264.so" not found`）。症状：启动弹「已配置的编码器缺失：
-      obs_x264」+「Failed to initialize service」，然后退出。
-      **根因已查明**：安装时系统只把 `lib*.so` 当原生库存进 `nativeLibraryDir`
-      （非 debuggable 包实测 34 个 `.so` 只解出 20 个，全是 `lib` 前缀的；14 个插件叫
-      `obs-x264.so` / `android-camera.so` 这种，一个都没解出来）。debuggable 包会全量解出，
-      所以这个问题一直被掩盖——**这个移植从没验证过真正的 release 包**。
-      两个候选修法（未定）：
-        1. `android:extractNativeLibs="false"`：`lib/` 不压缩存储 + 4K 对齐，运行时从
-           `base.apk!/lib/<abi>/` 直接 mmap。不改文件名。代价：APK 变大（~90 MB）。
-        2. 插件改名加 `lib` 前缀（`obs-x264.so` → `libobs-x264.so`）。体积不变，但
-           `get_module_name()` 只剥 `.so` 不剥 `lib`，模块名会变成 `libobs-x264`，需一并确认。
-      > 二分已定位到提交 `58cc365b`（"版本号接到 33.0.1，去掉 debuggable"）；插件 `.so`
-      > 字节级完全相同，差异只在清单。诊断用的 `test/plugin-load-log` 分支已删。
+- [x] ~~**【发版阻塞】非 debuggable 包里 14 个插件全部加载失败**~~
+      **已解决**（见上面「插件分发与加载」一节）。根因是安装时系统只把 `lib*.so` 解到
+      `nativeLibraryDir`，而我们的插件名不带 `lib` 前缀 ⇒ 一个都没解出来。改成插件走
+      APK 的 `assets/`、启动时解到 `$OBS_ROOT_PATH/lib`、再用 `obs_load_plugins()` 扫目录
+      加载之后，非 debuggable 包实测 **14 个插件、0 失败**，顺带支持用户按需增减插件。
 - [ ] **浮动 dock 崩溃**：有源在渲染时浮动 dock → 新原生窗口销毁 Surface →
       `makeCurrent(): no EGLSurface` → `QRhiGles2` 失败 → SIGSEGV
       （`reason=5 (APP CRASH(NATIVE))` status=11）。倾向方案：Android 上直接去掉
