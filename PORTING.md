@@ -647,6 +647,20 @@ CODESTYLE：新常量用 `kCamelCase`。`OBSApp.cpp` 的 `HOLD_MS` / `MOVE_SLOP`
 
 ### 已知缺陷
 
+- [ ] **【发版阻塞】非 debuggable 包里 14 个插件全部加载失败**（`rc=-2`，
+      `dlopen failed: library "obs-x264.so" not found`）。症状：启动弹「已配置的编码器缺失：
+      obs_x264」+「Failed to initialize service」，然后退出。
+      **根因已查明**：安装时系统只把 `lib*.so` 当原生库存进 `nativeLibraryDir`
+      （非 debuggable 包实测 34 个 `.so` 只解出 20 个，全是 `lib` 前缀的；14 个插件叫
+      `obs-x264.so` / `android-camera.so` 这种，一个都没解出来）。debuggable 包会全量解出，
+      所以这个问题一直被掩盖——**这个移植从没验证过真正的 release 包**。
+      两个候选修法（未定）：
+        1. `android:extractNativeLibs="false"`：`lib/` 不压缩存储 + 4K 对齐，运行时从
+           `base.apk!/lib/<abi>/` 直接 mmap。不改文件名。代价：APK 变大（~90 MB）。
+        2. 插件改名加 `lib` 前缀（`obs-x264.so` → `libobs-x264.so`）。体积不变，但
+           `get_module_name()` 只剥 `.so` 不剥 `lib`，模块名会变成 `libobs-x264`，需一并确认。
+      > 二分已定位到提交 `58cc365b`（"版本号接到 33.0.1，去掉 debuggable"）；插件 `.so`
+      > 字节级完全相同，差异只在清单。诊断用的 `test/plugin-load-log` 分支已删。
 - [ ] **浮动 dock 崩溃**：有源在渲染时浮动 dock → 新原生窗口销毁 Surface →
       `makeCurrent(): no EGLSurface` → `QRhiGles2` 失败 → SIGSEGV
       （`reason=5 (APP CRASH(NATIVE))` status=11）。倾向方案：Android 上直接去掉
@@ -658,7 +672,9 @@ CODESTYLE：新常量用 `kCamelCase`。`OBSApp.cpp` 的 `HOLD_MS` / `MOVE_SLOP`
       更新 611×526 … 逐个做源码级放宽。做法：跑一遍主界面打开各个对话框，
       日志里每一条 `CLAMP-BLOCKED` 就是一个待修项
 - [ ] `ObsForegroundService.java` 缺 `microphone` 前台类型（Android 14+ 后台录音静默断）
-- [ ] `AndroidManifest.xml:93` `debuggable="true"` + debug keystore 签 release
+- [x] `AndroidManifest.xml` `debuggable="true"` —— 已在 `58cc365b` 去掉。**但去掉后暴露出
+      上面那条「非 debuggable 包插件全加载失败」的阻塞问题，修好之前不能发 release 包。**
+- [ ] 正式版签名：现在每次构建都现生成 debug keystore，用户升级必须卸载重装（丢配置）。
 
 ### 未做真机功能验证
 
