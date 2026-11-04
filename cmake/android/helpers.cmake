@@ -36,8 +36,12 @@ function(set_target_properties_obs target)
   # 应用真正需要的只有"依赖"这一件：打包 APK 前 libobs / 渲染后端 / 插件都得是新鲜的
   # （libobs-opengl.so 与各插件是运行时 dlopen 的，链接期依赖抓不住它们）。
   # install 与 rundir 拷贝对 APK 交付物没有意义，跳过。
+  #
+  # !!! Qt 6.11.1 实测：_qt_is_android_executable 已经不可靠（升级后失效），上面三件事
+  # 真的发生了 —— 前端库被拷进 lib/obs-plugins/，一度让 APK 白胖 99 MB。
+  # 所以这里再按**目标身份**判一次：前端应用就是 obs-studio，这个判断不随 Qt 升级失效。
   get_target_property(_is_qt_android_app ${target} _qt_is_android_executable)
-  if(_is_qt_android_app)
+  if(_is_qt_android_app OR target STREQUAL obs-studio)
     get_property(obs_executables GLOBAL PROPERTY _OBS_EXECUTABLES)
     get_property(obs_modules GLOBAL PROPERTY OBS_MODULES_ENABLED)
     if(obs_executables OR obs_modules)
