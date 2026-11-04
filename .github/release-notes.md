@@ -4,7 +4,6 @@ OBS Studio 的 Android 移植，基于上游 **33.0.1**。
 
 - 内置摄像头（Camera2），支持前后置切换
 - UVC 摄像头（USB OTG）
-- 尼康相机（Wi-Fi 无线）
 - 屏幕采集（MediaProjection，含系统内录）
 - 图像、文本
 

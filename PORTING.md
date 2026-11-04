@@ -257,7 +257,7 @@ rm -rf "$PKG_ASSETS" && mkdir -p "$PKG_ASSETS"
 非 debuggable 包安装时，系统**只把 `lib*.so` 解到 `nativeLibraryDir`**。我们的插件叫
 `obs-x264.so` / `android-camera.so`（OBS 插件惯例：名字不带 `lib` 前缀），一个都解不出来
 —— 实测 34 个 `.so` 只解出 20 个，正好是那 20 个 `lib*` 的。这就是之前非 debuggable 包
-「14 个插件全部 `dlopen not found`」的根因；debuggable 包会全量解出，所以这个问题一直被掩盖。
+「全部内置插件 `dlopen not found`」的根因；debuggable 包会全量解出，所以这个问题一直被掩盖。
 
 > 曾怀疑是 Android 10+ 的 W^X 拦住了「从私有目录 dlopen」。**实测否证**：那条限制针对
 > `execve`（执行程序），不拦 `dlopen`；从私有目录 dlopen 成功，`os_glob` 也能正常扫。
@@ -281,6 +281,32 @@ $OBS_ROOT_PATH/lib/*.so                      （解压到应用私有目录）
   路径由 `libobs/obs-android.c` 的 `add_default_module_paths()` 注册，模板与桌面一致：
   `bin=$ROOT/lib`、`data=$ROOT/share/obs/obs-plugins/%module%`。
 
+### 谁是 core、谁是 plugin
+
+`PluginManager`（插件管理器）只显示 `OBS_MODULE_TYPE_PLUGIN` 的模块，**跳过 core**
+（`PluginManager.cpp:42` 的 `obs_is_core_module()`）；core 模块还免疫用户的 disabled 配置
+（`obs-module.c:502`）。所以桌面版全新安装的插件管理器是**空的** —— `plugins/` 里那些走
+`add_core_module()` 的都是 core。
+
+Android 上据此分两类：
+
+| 类别 | 谁 | 装载类型 | 在插件管理器里 |
+|---|---|---|---|
+| **core** | 8 个上游插件（image-source / obs-x264 / obs-filters / obs-transitions / text-freetype2 / rtmp-services / obs-outputs / obs-ffmpeg）+ obs-libfdk | `CORE` | 不显示，也不可禁用 |
+| **plugin** | 4 个移植自有采集插件（android-audio / android-camera / android-capture / android-screen） | `PLUGIN` | **显示，可禁用**（重启生效） |
+
+为什么这样分：core 留给"随包发布的必需功能"，禁用会直接把应用弄残（禁 obs-x264 就没法录）；
+移植那几个是 Android 特有的**可选**采集能力，用户应该能关掉（比如某个 USB 采集在特定机型
+上闹毛病时）。
+
+实现就在 `plugins/CMakeLists.txt` 的 Android 分支：`add_subdirectory()` 之后、
+`set_obs_core_modules()` 之前，把这 4 个从 `OBS_MODULES_ENABLED` 里 `list(REMOVE_ITEM)` 掉
+—— 它们就不进 `obs_core_modules[]`，随后由 `loadPlugins()` 以 PLUGIN 装载。
+（`obs-encode-sink` 是 CI 用的测试 sink、`nikon-source` 已不维护，两者都已从工程删除。）
+
+> 顺序很关键：这一步必须在 `add_subdirectory()` **之后** —— `target_install_resources()`
+> 是在 `add_subdirectory()` 期间按"是否在 `OBS_MODULES_ENABLED` 里"决定插件数据放
+> `share/obs/obs-plugins/<模块>` 的；先剔掉会让数据落到错的位置。
 ### 按需加载：`$ROOT/lib` 也是用户能写的地方
 
 两条规矩（见 `extractPluginBinaries()`）：
@@ -700,11 +726,11 @@ CODESTYLE：新常量用 `kCamelCase`。`OBSApp.cpp` 的 `HOLD_MS` / `MOVE_SLOP`
 
 ### 已知缺陷
 
-- [x] ~~**【发版阻塞】非 debuggable 包里 14 个插件全部加载失败**~~
+- [x] ~~**【发版阻塞】非 debuggable 包里内置插件全部加载失败**~~
       **已解决**（见上面「插件分发与加载」一节）。根因是安装时系统只把 `lib*.so` 解到
       `nativeLibraryDir`，而我们的插件名不带 `lib` 前缀 ⇒ 一个都没解出来。改成插件走
       APK 的 `assets/`、启动时解到 `$OBS_ROOT_PATH/lib`、再用 `obs_load_plugins()` 扫目录
-      加载之后，非 debuggable 包实测 **14 个插件、0 失败**，顺带支持用户按需增减插件。
+      加载之后，非 debuggable 包实测 **13 个插件、0 失败**，顺带支持用户按需增减插件。
 - [ ] **浮动 dock 崩溃**：有源在渲染时浮动 dock → 新原生窗口销毁 Surface →
       `makeCurrent(): no EGLSurface` → `QRhiGles2` 失败 → SIGSEGV
       （`reason=5 (APP CRASH(NATIVE))` status=11）。倾向方案：Android 上直接去掉
@@ -731,8 +757,6 @@ CODESTYLE：新常量用 `kCamelCase`。`OBSApp.cpp` 的 `HOLD_MS` / `MOVE_SLOP`
       建议拆成 4 个单责过滤器
 - [ ] 探针日志 63 处：约 20 处有长期价值、约 21 处是每事件残留。建议加
       `OBS_ANDROID_PROBE` 运行时开关（默认关），长期项降到 `LOG_DEBUG`
-- [ ] 提取 `plugins/android-common/`：uvc 与 nikon 有 6 组逐字重复（USB 枚举、采集线程
-      三件套、JPEG→BGRA 整段…）。**复制已经造成过缺陷** —— nikon 漏了 uvc 已修好的 NULL 检查
 - [ ] 容器格式限制 5 处各自编码、预览面所有权 5 处各自实现 —— 收敛成单一入口
 - [ ] CI：缓存 key 已含 `NDK_VERSION`（换 NDK 会整份重建），但仍不含 `API`；
       `always()` 保存半成品 prebuilt 可能毒化缓存；
