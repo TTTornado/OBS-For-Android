@@ -18,6 +18,7 @@
 #include "AndroidRuntimeBootstrap.hpp"
 
 #include <QByteArray>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
@@ -27,6 +28,7 @@
 
 #include <android/log.h>
 
+#include <cstdlib>
 #include <fstream>
 #include <string>
 
@@ -101,7 +103,156 @@ void unpack(const char *label, const QString &resRoot, const QString &dstRoot)
 	PKG("%s：%s，%d 个文件 -> %s", label, ok ? "解包成功" : "解包失败", files, dstRoot.toUtf8().constData());
 }
 
+/* 插件 .so：从 APK 的 assets/obs-plugins/ 解到 $ROOT/lib。
+ *
+ * 为什么是 assets 不是 Qt 资源：qt_add_resources 的 FILES 是 configure 期定死的清单，
+ * 而插件 .so 是 build 期产物，configure 时还不存在。
+ * 为什么不进 APK 的 lib/<abi>/：非 debuggable 包安装时系统只把 lib*.so 解到
+ * nativeLibraryDir，我们的插件名不带 lib 前缀，一个都解不出来（实测 34 个只解出 20 个）。
+ *
+ * 按 build-apk.sh 生成的 MANIFEST 逐个解，不依赖 Qt 的 assets 目录列举能力。
+ *
+ * 按需加载的两条规矩（$ROOT/lib 是用户也能放插件的目录，所以不能粗暴对待）：
+ *  ① **只动 MANIFEST 登记过的文件**（记在 .managed 里）。用户自己塞进来的 .so 一个都不碰。
+ *     上一版登记过、这一版没有的会被删掉（插件从包里下架了）。
+ *  ② **版本标记**：MANIFEST 的哈希写进 .bundle-stamp，内容没变且登记的文件都在就跳过解压。
+ *     用 MANIFEST 哈希而不是版本号 —— 插件集合一变标记就变，比版本号准。 */
+constexpr const char *kStampFile = "/.bundle-stamp";
+constexpr const char *kManagedFile = "/.managed";
+
+QStringList readLineList(const QString &path)
+{
+	QFile f(path);
+	if (!f.open(QIODevice::ReadOnly))
+		return {};
+	return QString::fromUtf8(f.readAll()).split('\n', Qt::SkipEmptyParts);
+}
+
+void writeLineList(const QString &path, const QStringList &items)
+{
+	QFile f(path);
+	if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+		return;
+	QByteArray out;
+	for (const QString &s : items) {
+		out += s.toUtf8();
+		out += '\n';
+	}
+	f.write(out);
+	f.close();
+}
+
+bool extractPluginBinaries(const QString &dstRoot)
+{
+	QFile manifest(QStringLiteral("assets:/obs-plugins/MANIFEST"));
+	if (!manifest.open(QIODevice::ReadOnly)) {
+		PKG("插件二进制：打不开 assets:/obs-plugins/MANIFEST —— 这一版的包里没有插件");
+		return false;
+	}
+	const QByteArray manifestBytes = manifest.readAll();
+	manifest.close();
+
+	QStringList names;
+	for (const QString &raw : QString::fromUtf8(manifestBytes).split('\n', Qt::SkipEmptyParts)) {
+		const QString name = raw.trimmed();
+		if (!name.isEmpty() && !name.contains('/'))
+			names << name;
+	}
+	if (names.isEmpty()) {
+		PKG("插件二进制：MANIFEST 是空的");
+		return false;
+	}
+
+	if (!QDir().mkpath(dstRoot)) {
+		PKG("插件二进制：建不出 %s", dstRoot.toUtf8().constData());
+		return false;
+	}
+
+	const QString stamp =
+		QString::fromLatin1(QCryptographicHash::hash(manifestBytes, QCryptographicHash::Sha1).toHex());
+
+	/* 已经是最新？—— 标记一致，且登记的文件都还在（用户可能删了某个）*/
+	bool upToDate = readLineList(dstRoot + kStampFile).value(0) == stamp;
+	if (upToDate) {
+		for (const QString &n : names) {
+			if (!QFile::exists(dstRoot + '/' + n)) {
+				upToDate = false;
+				break;
+			}
+		}
+	}
+	if (upToDate) {
+		PKG("插件二进制：已是最新（%d 个），跳过解压", int(names.size()));
+		return true;
+	}
+
+	/* 上一版登记过、这一版没了的 → 删掉。用户自己的文件不在 .managed 里，不会被碰。 */
+	const QStringList oldManaged = readLineList(dstRoot + kManagedFile);
+	for (const QString &m : oldManaged) {
+		if (!names.contains(m)) {
+			QFile::remove(dstRoot + '/' + m);
+			PKG("插件二进制：下架旧插件 %s", m.toUtf8().constData());
+		}
+	}
+
+	int n = 0;
+	for (const QString &name : names) {
+		QFile src(QStringLiteral("assets:/obs-plugins/") + name);
+		if (!src.open(QIODevice::ReadOnly)) {
+			PKG("插件二进制：打不开 assets:/obs-plugins/%s", name.toUtf8().constData());
+			return false;
+		}
+		const QByteArray data = src.readAll();
+		src.close();
+
+		/* 先写 .part 再改名：避免 dlopen 撞到写了一半的 .so（.part 不会被 *.so 匹配到）*/
+		const QString tmp = dstRoot + '/' + name + QStringLiteral(".part");
+		QFile out(tmp);
+		if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+			PKG("插件二进制：写不了 %s", tmp.toUtf8().constData());
+			return false;
+		}
+		const qint64 wrote = out.write(data);
+		out.close();
+		if (wrote != data.size()) {
+			PKG("插件二进制：%s 只写了 %lld/%d 字节", name.toUtf8().constData(), (long long)wrote,
+			    int(data.size()));
+			return false;
+		}
+		QFile::remove(dstRoot + '/' + name);
+		if (!QFile::rename(tmp, dstRoot + '/' + name)) {
+			PKG("插件二进制：改名失败 %s", name.toUtf8().constData());
+			return false;
+		}
+		++n;
+	}
+
+	writeLineList(dstRoot + kManagedFile, names);
+	writeLineList(dstRoot + kStampFile, QStringList{stamp});
+	PKG("插件二进制：解出 %d 个 .so -> %s", n, dstRoot.toUtf8().constData());
+	return true;
+}
+
 } // namespace
+
+void EnsureAndroidPluginBinaries()
+{
+	/* 必须在 QApplication 之后调用 —— Qt 的 `assets:` 文件引擎是平台插件初始化时
+	 * 注册的，而 PrepareAndroidRuntimePaths() 跑在 QApplication 之前。插件装载发生在
+	 * OBSApp（QApplication 子类）构造之后，所以由 loader 在装载前调这里。 */
+	static bool done = false;
+	if (done)
+		return;
+
+	const char *root = getenv("OBS_ROOT_PATH");
+	if (!root || !*root) {
+		PKG("插件二进制：OBS_ROOT_PATH 未设置，跳过解压");
+		return;
+	}
+
+	/* 只有成功才置位：失败的话下次调用还能再试。 */
+	done = extractPluginBinaries(QString::fromUtf8(root) + "/lib");
+}
 
 void PrepareAndroidRuntimePaths()
 {

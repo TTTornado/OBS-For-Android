@@ -52,3 +52,7 @@ build-aux/flatpak-github-action-modified-*
 
 # Exclude CMake build number cache
 /cmake/.CMakeBuildNumber
+
+# android/build-apk.sh 构建期把插件 .so 暂存到这里，由 androiddeployqt 打进 APK 的
+# assets/obs-plugins/。是构建产物（几十 MB），不进版本库。
+/frontend/cmake/android/assets/

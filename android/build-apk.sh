@@ -81,21 +81,59 @@ USE_CCACHE="${USE_CCACHE:-0}" \
 FE="$BUILD/frontend"
 [ -d "$FE" ] || die "构建目录里没有 frontend/: $FE"
 
-# ---------------------------------------------------------------- 2) 插件 .so 暂存
-# 插件名不以 lib 开头，走不了 QT_ANDROID_EXTRA_LIBS（androiddeployqt 硬性要求 lib 前缀），
-# 只能放进包源目录的 libs/<abi>/，由 gradle 当 jniLibs 收进 APK。
+# ---------------------------------------------------------------- 2) 插件 .so 暂存到 assets
+# 插件**不**进 APK 的 lib/<abi>/：非 debuggable 包安装时系统只把 lib*.so 解到
+# nativeLibraryDir，我们的插件名不带 lib 前缀，一个都解不出来（实测 34 个只解出 20 个）。
+# 改走 assets：保留原文件名、APK 照样压缩，启动时由 AndroidRuntimeBootstrap 解到
+# $OBS_ROOT_PATH/lib，再由 obs_load_plugins() 扫目录加载 —— 也不再依赖系统的原生库提取规则。
 #
-# 注意：**先清空再拷**。原来只做 cp -f，删掉的插件会一直留在包里、
+# 注意：**先清空再拷**。只做 cp -f 的话，删掉的插件会一直留在包里、
 # 旧 .so 会覆盖新构建 —— 那种"改了没生效"最难查。
 PLUG_SRC="$(find "$BUILD/rundir" -type d -path '*/lib/obs-plugins' 2>/dev/null | head -1)"
 [ -n "$PLUG_SRC" ] || die "rundir 里找不到 lib/obs-plugins（APK 会缺插件）"
 
-PKG_LIBS="$ROOT/frontend/cmake/android/libs/$ABI"
-rm -rf "$PKG_LIBS"
-mkdir -p "$PKG_LIBS"
-cp -f "$PLUG_SRC"/*.so "$PKG_LIBS"/
-echo "---- 插件暂存 -> frontend/cmake/android/libs/$ABI ----"
-ls -1 "$PKG_LIBS" | sed 's/^/  /'
+PKG_ASSETS="$ROOT/frontend/cmake/android/assets/obs-plugins"
+rm -rf "$PKG_ASSETS"
+mkdir -p "$PKG_ASSETS"
+
+# rundir/lib/obs-plugins/ 里的东西**就是**插件 —— 这是构建系统保证的不变式：
+# 只有被当作插件的 MODULE 目标才会被拷进这个目录（cmake/android/helpers.cmake）。
+# 所以打包时**不做任何文件名过滤**：按名字猜"谁是插件"会把未来一个叫 libfoo.so 的
+# 合法插件静默漏掉。
+#
+# 但不变式曾经被破坏过：Qt 6.11.1 里 _qt_is_android_executable 失效，前端应用库
+# （libobs_<abi>.so，99 MB）被当成插件拷进了这个目录，APK 白胖一倍且悄无声息。
+# 那里已经按目标身份修好了；这里再放一条断言，把"再次静默复发"变成响亮失败。
+for f in "$PLUG_SRC"/*.so; do
+	[ -f "$f" ] || continue
+	case "$(basename "$f")" in
+	libobs_* | libQt*)
+		die "lib/obs-plugins 里混进了非插件：$(basename "$f") —— helpers.cmake 的 guard 又失效了"
+		;;
+	esac
+done
+
+# strip：assets 不经过 Gradle 的 stripReleaseDebugSymbols，而 rundir 里那份 .so 是带 -g 的，
+# 不 strip 会比原来打进 lib/ 的版本大一圈。
+STRIP="${NDK}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
+cp -f "$PLUG_SRC"/*.so "$PKG_ASSETS"/
+count=0
+for f in "$PKG_ASSETS"/*.so; do
+	[ -f "$f" ] || continue
+	if [ -x "$STRIP" ]; then
+		"$STRIP" --strip-unneeded "$f" || true
+	fi
+	count=$((count + 1))
+done
+[ "$count" -gt 0 ] || die "$PLUG_SRC 里没有任何插件 .so"
+
+# 清单：运行时按清单逐个从 assets 解出来，不依赖 Qt 的 assets 目录列举能力
+( cd "$PKG_ASSETS" && ls -1 ./*.so | sed 's#^\./##' ) > "$PKG_ASSETS/MANIFEST"
+echo "---- 插件暂存 -> frontend/cmake/android/assets/obs-plugins（$count 个）----"
+sed 's/^/  /' "$PKG_ASSETS/MANIFEST"
+
+# 旧的 libs/<abi>/ 暂存清掉，避免残留插件还留在 APK 的 lib/ 里形成"半套插件"
+rm -rf "$ROOT/frontend/cmake/android/libs"
 
 # ---------------------------------------------------------------- 3) 带插件重打包
 SETTINGS="$FE/android-obs-studio-deployment-settings.json"
@@ -106,13 +144,11 @@ AB="$FE/android-build"
 
 # 注意：**不要**删掉 android-build 目录。
 # Qt 的 CMake 已经把 androiddeployqt 挂成构建目标（日志里的
-# "[450/451] Creating APK for obs-studio"），那次出包时插件还没暂存，
+# "[450/451] Creating APK for obs-studio"），但那一次出包时 assets 里的插件还没暂存，
 # 所以那个 APK **不含插件**；而 androiddeployqt 重跑时需要
 # android-build/libs/<abi>/libobs_arm64_v8a.so（CMake 拷进去的应用库），
 # 目录一删就会报 "Cannot find application binary"。
-# 因此这里只做"换掉插件 + 清产物"，然后强制重打包 —— 与原移植脚本同一套路。
-mkdir -p "$AB/libs/$ABI"
-cp -f "$PLUG_SRC"/*.so "$AB/libs/$ABI"/
+# 因此这里只做"清产物 + 强制重打包"，让 assets 进包 —— 与原移植脚本同一套路。
 rm -f "$AB/obs-studio.apk"
 rm -rf "$AB/build/outputs/apk" \
 	"$AB/build/intermediates/merged_jni_libs" \
