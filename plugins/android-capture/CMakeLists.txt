@@ -9,7 +9,7 @@ target_link_libraries(android-capture PRIVATE OBS::libobs)
 if(OS_ANDROID)
   # 阶段 2 第 2 项的 USB 栈，全部来自 deps-android/prebuilt/<ABI>（交叉编译的静态库）：
   #   libusb-1.0.a   -> Android 无 root 模式：NO_DEVICE_DISCOVERY + libusb_wrap_sys_device()
-  #                     包住 Java 传下来的 fd（nikon-source 真机验证过的唯一可行模式）
+  #                     包住 Java 传下来的 fd（早先的 nikon 采集插件 真机验证过的唯一可行模式）
   #   libturbojpeg.a -> MJPEG 载荷 -> BGRA 解码
   # 曾经链的 libuvc.a + libjpeg.a 已撤掉：libuvc 0.0.7 的 uvc_init(NULL) 内部起默认
   # libusb 上下文，要建 NETLINK_KOBJECT_UEVENT socket，Android 的 SELinux 必拒

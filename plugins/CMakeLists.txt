@@ -27,8 +27,6 @@ if(OS_ANDROID)
   # obs-outputs … 都还没移植），所以在这里提前 return，只放行当前阶段需要的少数几个：
   #   image-source     —— 阶段 1 第 5 项要的 color source（libobs 内部没有颜色源）
   #   obs-x264         —— 阶段 1 里程碑要的"x264 编码一帧"
-  #   obs-encode-sink  —— 只有 obs_output 才会去 obs_encoder_start()（该符号不在
-  #                       libobs 的 .dynsym 里），所以编码验证需要一个视频专用 sink
   #   android-audio    —— 阶段 2 第 1 项：AAudio 采集源（内置麦克风/有线耳机）
   #   android-capture  —— 阶段 2 第 2 项：libuvc/libusb 的 UVC 摄像头采集源
   #   android-camera   —— P-17：内置摄像头采集源（Camera2 NDK，纯 native 取流，不需要 Java 侧
@@ -76,16 +74,10 @@ if(OS_ANDROID)
   # 后续阶段按需要在下面逐条放开，别一次全开。
   add_subdirectory(image-source)
   add_subdirectory(obs-x264)
-  add_subdirectory(obs-encode-sink)
   add_subdirectory(android-audio)
   add_subdirectory(android-capture)
   add_subdirectory(android-camera)
   add_subdirectory(android-screen)
-  #   nikon-source     —— Nikon Webcam 采集源（Z 系列，自实现 PTP/MTP 客户端经 libusb 拉
-  #                       Live View JPEG，turbojpeg 解 BGRA 推异步帧）。依赖面与 android-capture
-  #                       同一档：静态链 deps 的 libusb-1.0.a + libturbojpeg.a，不链 libandroid，
-  #                       APK 里不多一枚 .so；本行同时进构建、白名单与核心装载清单。
-  add_subdirectory(nikon-source)
   add_subdirectory(obs-transitions)
   add_subdirectory(obs-filters)
   add_subdirectory(text-freetype2)
@@ -155,12 +147,35 @@ if(OS_ANDROID)
   #                       （P-5 已闭环），设置里那 7 个只有 ffmpeg muxer 才支持的封装格式
   #                       （mkv/flv/mov/mpegts/hls…）在 Android 上仍不可选 —— 归 P-6 前端清单。
   add_subdirectory(obs-ffmpeg)
+  #   obs-libfdk       —— FDK-AAC 编码器。默认 ENABLE_LIBFDK=OFF（官方 CI 显式打开），
+  #                       本移植在 compile-check.sh 里打开。依赖 fdk-aac 已随 deps 的
+  #                       output 批次交叉编译（android/deps-android/defs.sh:build_fdk_aac），
+  #                       走 autotools 装出 libfdk-aac.a + fdk-aac.pc，FindLibfdk.cmake
+  #                       两种方式都能认（pkg-config 优先、find_library 兜底）。
+  #                       注意 fdk-aac 是 C++ 实现、我们链的是静态库，而 obs-libfdk 只有
+  #                       C 源文件 —— CMake 会因此选 C 链接器，缺 C++ 运行时符号，
+  #                       所以在它自己的 CMakeLists 里强制 LINKER_LANGUAGE CXX。
+  add_subdirectory(obs-libfdk)
   # OBS 33.0 新增：obs-core-modules.c 由 set_obs_core_modules() 用 configure_file
   # 生成到 libobs 的 binary 目录，而 libobs/cmake/obs-core-modules.cmake:4 的
   # target_sources 引用的是相对名 obs-core-modules.c —— 不生成就报
   # "Cannot find source file: obs-core-modules.c"（Generate 阶段失败）。
-  # 上游在文件末尾（:257）调用它，本分支提前 return 会跳过，因此这里补一次，
+  # 上游在文件末尾（:264）调用它，本分支提前 return 会跳过，因此这里补一次，
   # 与上面 ENABLE_CORE_MODULES=OFF 分支（:18）的写法一致。
+  #
+  # 移植自有的**可选**采集插件不进 core 清单：
+  #   * core 模块会被 PluginManager 跳过（不进插件管理器）、且不受用户 disabled 配置
+  #     影响（obs-module.c:502）—— 对随包发布的必需功能（编解码/滤镜/转场/推流）是对的；
+  #   * 但这几个是 Android 特有的可选采集能力，用户应该能在插件管理器里看到并禁用
+  #     （比如某个 USB 采集在特定机型上闹毛病时可以关掉）。
+  # 剔出清单后，它们会由 loadPlugins() 以 OBS_MODULE_TYPE_PLUGIN 装载并出现在管理器里。
+  # 注意必须在 add_subdirectory 之后、set_obs_core_modules() 之前做：target_install_resources
+  # 已经在 add_subdirectory 期间按"成员身份"把插件数据放到了 share/obs/obs-plugins/<模块>，
+  # 这里改的只是 core 清单的输入，不影响数据目录。
+  get_property(_android_noncore_modules GLOBAL PROPERTY OBS_MODULES_ENABLED)
+  list(REMOVE_ITEM _android_noncore_modules android-audio android-camera android-capture android-screen)
+  set_property(GLOBAL PROPERTY OBS_MODULES_ENABLED ${_android_noncore_modules})
+
   set_obs_core_modules()
   return()
 endif()

@@ -2,7 +2,7 @@
 //
 // 为什么是重写而不是继续用 libuvc：旧实现经 libuvc 的 uvc_init(&ctx, NULL) 起内部
 // libusb 上下文 —— 那一步在 Android 上必挂（libusb 默认初始化要建 NETLINK_KOBJECT_UEVENT
-// 热插拔 socket，SELinux 直接拒，真机实测 -1/LIBUSB_ERROR_IO）。nikon-source 已真机验证
+// 热插拔 socket，SELinux 直接拒，真机实测 -1/LIBUSB_ERROR_IO）。早先的 nikon 采集插件 已真机验证
 // 唯一可行的模式：libusb_init_context(LIBUSB_OPTION_NO_DEVICE_DISCOVERY) +
 // libusb_wrap_sys_device(fd)。libuvc 0.0.7 不允许把自建上下文喂给 uvc_init 还让它泵事件
 // （own_usb_ctx=0 就不起事件线程，回调永远不来），所以这条路只能自己写。
@@ -31,11 +31,11 @@
 // 描述符解析、probe/commit 协商、payload 重组都是按 UVC 1.0/1.1 规范自写的最小实现，
 // 只支持三种载荷：MJPEG（turbojpeg 解码）、YUYV（直通 VIDEO_FORMAT_YUY2）、NV12。
 //
-// fd 从哪来：与 nikon-source 同一条路 —— Java 侧 UsbManager 打开设备，fd 经 libobs 的
+// fd 从哪来：与 早先的 nikon 采集插件 同一条路 —— Java 侧 UsbManager 打开设备，fd 经 libobs 的
 // Android USB 总线（obs-android.h）传进来。fd 归 Java 所有，这里绝不 close(fd)，
 // 只用 obs_android_usb_close() 归还。
 //
-// 线程模型：照抄 nikon-source —— 采集循环在插件自己的 pthread 上（activate 起、
+// 线程模型：照抄 早先的 nikon 采集插件 —— 采集循环在插件自己的 pthread 上（activate 起、
 // deactivate/destroy 拆，shutting_down 原子量 + join），libusb 句柄、帧缓冲全部只活在
 // 这条线程里，主结构里只留状态文本和帧计数给属性页读。
 
@@ -51,7 +51,7 @@
 #include <util/platform.h>
 #include <util/threading.h>
 
-/* obs.h 里的包含是 #ifdef __ANDROID__ 的，头本身与平台无关（同 nikon-source 的取舍） */
+/* obs.h 里的包含是 #ifdef __ANDROID__ 的，头本身与平台无关（同 早先的 nikon 采集插件 的取舍） */
 #include <obs-android.h>
 
 /* ---------------- UVC 常量（规范 4.3.1.1 / A.9） ---------------- */
@@ -84,7 +84,7 @@
 #define MAX_FRAME_BYTES (32U * 1024U * 1024U) /* 帧缓冲上限，防爆 */
 #define MAX_MODES 64                          /* 单个 format 下的 frame 描述符总数上限 */
 
-/* 连续 USB 错误超过这个数就放弃本次会话，走整体拆除 + 指数退避重开（同 nikon-source） */
+/* 连续 USB 错误超过这个数就放弃本次会话，走整体拆除 + 指数退避重开（同 早先的 nikon 采集插件） */
 #define MAX_CONSEC_USB_ERR 5
 #define RETRY_BACKOFF_MIN_MS 1000ULL
 #define RETRY_BACKOFF_MAX_MS 8000ULL
@@ -174,7 +174,7 @@ struct uvc_source {
 	char fmt_setting[16]; /* video_format 设置的原始字符串，打日志消歧义用 */
 	char usb_id[16];      /* 首台匹配设备的 "vid:pid"（label 前缀），拔插换号后按它认设备 */
 
-	/* 采集线程与拆除协议（照 nikon-source/camera2-input.c：shutting_down 置 1 后 join） */
+	/* 采集线程与拆除协议（照 早先的 nikon 采集插件/camera2-input.c：shutting_down 置 1 后 join） */
 	pthread_t thread;
 	volatile long thread_started;
 	volatile long shutting_down;
@@ -1236,7 +1236,7 @@ static bool uvc_run_once(struct uvc_source *s, bool *perm_requested)
 	}
 	*perm_requested = false;
 
-	/* ---- 2. 借 fd，包 libusb（nikon-source 真机验证的唯一可行模式） ---- */
+	/* ---- 2. 借 fd，包 libusb（早先的 nikon 采集插件 真机验证的唯一可行模式） ---- */
 	d.bridge_fd = obs_android_usb_open(open_name);
 	if (d.bridge_fd <= 0) {
 		set_status(s, "打开设备失败（fd=%d）—— 设备被拔或授权刚被收回", d.bridge_fd);
@@ -2020,7 +2020,7 @@ static void *uvc_thread_main(void *arg)
 	return NULL;
 }
 
-/* ---------------- 线程启停（照 nikon-source） ---------------- */
+/* ---------------- 线程启停（照 早先的 nikon 采集插件） ---------------- */
 
 static void uvc_start_thread(struct uvc_source *s)
 {
@@ -2040,7 +2040,7 @@ static void uvc_stop_thread(struct uvc_source *s)
 		return;
 	os_atomic_set_long(&s->shutting_down, 1);
 	/* join 最坏堵一个 bulk 超时（1 s）。落在 deactivate/destroy（UI/视频线程）上，
-	 * 与 nikon-source 里"join 最坏堵一个 PTP 超时"是同一类取舍。 */
+	 * 与 早先的 nikon 采集插件 里"join 最坏堵一个 PTP 超时"是同一类取舍。 */
 	pthread_join(s->thread, NULL);
 	os_atomic_set_long(&s->thread_started, 0);
 }
@@ -2145,7 +2145,7 @@ static void uvc_update(void *data, obs_data_t *settings)
 	const int new_fps = (int) obs_data_get_int(settings, "fps");
 	const int new_fmt = fmt_string_to_kind(obs_data_get_string(settings, "video_format"));
 
-	/* 只拿"设置项 vs 设置项"比，没变化就不重启（同 nikon-source 的判法） */
+	/* 只拿"设置项 vs 设置项"比，没变化就不重启（同 早先的 nikon 采集插件 的判法） */
 	const bool changed = strcmp(dev ? dev : "", s->usb_device) != 0 || new_w != s->width ||
 			     new_h != s->height || new_fps != s->fps || new_fmt != s->prefer_fmt;
 	if (!changed)
@@ -2157,7 +2157,7 @@ static void uvc_update(void *data, obs_data_t *settings)
 		uvc_start_thread(s);
 }
 
-/* 属性页【申请 USB 授权】：权限结果是异步的，返回 false 不刷属性页（同 nikon-source） */
+/* 属性页【申请 USB 授权】：权限结果是异步的，返回 false 不刷属性页（同 早先的 nikon 采集插件） */
 static bool on_request_permission(obs_properties_t *props, obs_property_t *property, void *data)
 {
 	UNUSED_PARAMETER(props);

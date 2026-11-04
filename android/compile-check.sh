@@ -110,6 +110,7 @@ cmake -S "$ROOT" -B "$BUILD" -G Ninja \
   -DENABLE_FRONTEND="$ENABLE_FRONTEND" \
   -DENABLE_SCRIPTING=OFF \
   -DENABLE_HEVC=ON \
+  -DENABLE_LIBFDK=ON \
   "${EXTRA_CC[@]}" \
   "${EXTRA_FE[@]}" \
   "${EXTRA_SDK[@]}" || {

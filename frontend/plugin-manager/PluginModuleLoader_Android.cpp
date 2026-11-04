@@ -25,19 +25,21 @@
  * 而非 debuggable 的包 run-as 不进去 —— logcat 是唯一现场。 */
 #include "widgets/OBSAndroidDisplay.hpp"
 
-/* 插件 .so 在装载前才从 APK 的 assets 解到 $OBS_ROOT_PATH/lib ——
- * 必须在 QApplication 之后（Qt 的 assets: 引擎那时才注册），所以不能放在
- * PrepareAndroidRuntimePaths()（那在 main() 最前面）。 */
-#include <utility/AndroidRuntimeBootstrap.hpp>
-
 #include <cstdlib>
 #include <string>
 
 /* Android 上改用**扫目录**装载插件，与 Linux/BSD 的 loader 同一套逻辑
  * （obs_load_plugins() → find_modules_in_path() → os_glob()）。
  *
- * 前提是插件 .so 是真实文件系统上的文件：AndroidRuntimeBootstrap 启动时把
- * APK 的 assets/obs-plugins/ 解到 $OBS_ROOT_PATH/lib，这里扫这个目录。
+ * 前提是插件 .so 是真实文件系统上的文件：AndroidRuntimeBootstrap 在
+ * OBSApp::loadAppModules() 里（**早于** obs_load_core_modules()）把 APK 的
+ * assets/obs-plugins/ 解到 $OBS_ROOT_PATH/lib，这里扫这个目录。
+ *
+ * 分工：内置插件（obs_core_modules[] 里那 14 个）由
+ * libobs/obs-core-modules-loader-android.c 以 OBS_MODULE_TYPE_CORE 先装载，
+ * 所以这里扫到它们时会被 obs-module.c 的"already loaded"检查跳过 ——
+ * **只有用户自己放进 $OBS_ROOT_PATH/lib 的插件才在这里以 PLUGIN 类型载入**，
+ * 也就只有它们会出现在插件管理器里（与桌面一致）。
  *
  * 以前插件留在 APK 的 lib/<abi>/ 里 —— os_glob() 扫不到 APK 内部，才被迫改成
  * 编译期白名单逐个裸名 dlopen。解到私有目录之后那条限制就不存在了
@@ -67,11 +69,13 @@ State PluginManager::loadPlugins(bool /*usePortableMode*/)
 		return State::Failure;
 	}
 
-	/* 先把插件 .so 从 APK assets 解到 $OBS_ROOT_PATH/lib（幂等），再扫目录。 */
-	EnsureAndroidPluginBinaries();
+	/* 注意：插件 .so 的解压（EnsureAndroidPluginBinaries）**不在这里** ——
+	 * obs_load_core_modules() 比这里先跑，它要按 obs_core_modules[] 找 .so，
+	 * 所以解压必须在 OBSApp::loadAppModules() 最前面完成。这里只扫目录。 */
 
 	/* bin 不含 %module% ⇒ find_modules_in_path() 按"平铺目录"处理：
-	 * glob 出 <root>/lib 下的所有 .so，逐个当模块加载。 */
+	 * glob 出 <root>/lib 下的所有 .so，逐个当模块加载。
+	 * 内置插件已作为 CORE 装载过，这里会被"already loaded"检查跳过。 */
 	const std::string bin = std::string(rootEnv) + "/lib";
 	const std::string data = std::string(rootEnv) + "/share/obs/obs-plugins/%module%";
 

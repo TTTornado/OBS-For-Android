@@ -25,6 +25,7 @@
 #include <utility/OBSProxyStyle.hpp>
 #ifdef __ANDROID__
 #include <utility/android-window-fit.hpp>
+#include <utility/AndroidRuntimeBootstrap.hpp> /* EnsureAndroidPluginBinaries()：装载前解插件 .so */
 #endif
 #if defined(_WIN32) || defined(ENABLE_SPARKLE_UPDATER)
 #include <utility/models/branches.hpp>
@@ -2694,6 +2695,17 @@ void OBSApp::addLogLine(int logLevel, const QString &message)
 
 void OBSApp::loadAppModules()
 {
+#ifdef __ANDROID__
+	/* 插件 .so 必须**先**解到 $OBS_ROOT_PATH/lib —— 紧接着的 loadAllPlugins() 会先调
+	 * obs_load_core_modules()，它按 obs_core_modules[] 逐个到那个目录找 .so
+	 * （见 libobs/obs-core-modules-loader-android.c）。
+	 *
+	 * 不能放在 PrepareAndroidRuntimePaths()（main() 最前面）：Qt 的 `assets:` 文件引擎
+	 * 要等平台插件（QApplication）初始化后才注册，而 OBSApp 就是 QApplication 子类，
+	 * 到 loadAppModules() 时它已经在了。 */
+	EnsureAndroidPluginBinaries();
+#endif
+
 	using PluginMode = OBS::PluginManager::Mode;
 	PluginMode mode = (disable_3p_plugins || safe_mode) ? PluginMode::CoreOnly : PluginMode::Full;
 	pluginManager_->setPluginMode(mode);
