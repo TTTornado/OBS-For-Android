@@ -1,6 +1,6 @@
 # OBS Studio for Android — 移植说明
 
-[![Android compile check](https://github.com/TTTornado/obs-studio-android/actions/workflows/android-compile.yml/badge.svg)](https://github.com/TTTornado/obs-studio-android/actions/workflows/android-compile.yml)
+[![Android compile check](https://github.com/TTTornado/OBS-For-Android/actions/workflows/android-compile.yml/badge.svg)](https://github.com/TTTornado/OBS-For-Android/actions/workflows/android-compile.yml)
 
 本仓库是 [obsproject/obs-studio](https://github.com/obsproject/obs-studio) 的一个 fork，
 在根级布局上叠加 Android 移植（原移植工作由 [cunminF](https://github.com/cunminF/OBS_for_Android) 完成）。
