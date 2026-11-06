@@ -29,7 +29,7 @@
 
 **阶段 1：依赖 + 原生层编译验证（不装 Qt）**
 
-- 14 个第三方依赖的交叉编译（`android/deps-android/`），结果存 `actions/cache`
+- 14 个第三方依赖的交叉编译（`android/deps-android/`），**每轮完整重建，不缓存整包产物**
 - libobs / libobs-opengl(GLES) / 全部 `android-*` 采集插件的编译与链接
 - 用 `-DENABLE_FRONTEND=OFF` 单独验证「原生层不依赖 Qt」这条声明 —— 这是**快速失败闸门**：
   原生层挂掉时 Qt 还没下载
@@ -43,7 +43,9 @@
 
 **不覆盖**：任何运行时行为。相机、UVC、MediaProjection、AAudio、推流在 CI 里都验证不了。
 
-依赖缓存命中时，`fetch.sh` 与 `build.sh` 两个步骤整体跳过（`if: cache-hit != 'true'`）。
+`fetch.sh` / `build.sh` 每轮都完整执行：CI runner 全新，既没有 prebuilt 也没有
+`~/deps-work/state`，`build.sh` 的 stamp 不会命中。依赖跟随 `master`，
+上游一提交就会进入这一轮的源码并完整重编。
 
 ---
 
@@ -503,7 +505,7 @@ Qt 在 Android 上的逻辑像素 = dp，所以固定的 32（行高）、48（�
 ## 构建速度
 
 以 2026-11-06 的 [CI run #88](https://github.com/TTTornado/OBS-For-Android/actions/runs/42153137504)
-（deps 缓存失效、全量重建）的日志时间为准：
+（全量依赖重建）的日志时间为准 —— 去掉整包 deps 缓存后，**每轮**都是这个代价：
 
 | 阶段 | 耗时 |
 |---|---|
@@ -721,11 +723,11 @@ CODESTYLE：新常量用 `kCamelCase`。`OBSApp.cpp` 的 `HOLD_MS` / `MOVE_SLOP`
       走 `adb shell setprop debug.obs.probe 1`、默认关。**残留**：Java 侧 `lastAction` /
       `describe()` 等诊断日志仍与业务代码耦合，每事件日志待收敛到 `LOG_DEBUG`。
 - [ ] 容器格式限制 5 处各自编码、预览面所有权 5 处各自实现 —— 收敛成单一入口
-- [ ] CI：deps 缓存 key 仍不含 `API`；`always()` 保存半成品 prebuilt 可能毒化缓存；
-      paths 漏了 `deps/**`；`.gitignore` 对 `android/deps-android/{prebuilt,src}` 无规则
-- [ ] 构建可重现性：`fetch.sh` 已加 tar 全量列举校验、keystore 已参数化；
-      x264 / rnnoise 继续跟随 `master`（上游没有稳定 tag，依赖更新自动生效）。
-      **残留**：`apksigner`/`aapt2` 仍用 `sort -V | tail -1` 取最新。
+- [ ] CI：paths 漏了 `deps/**`；`.gitignore` 对 `android/deps-android/{prebuilt,src}` 无规则
+- [ ] 构建可重现性：`fetch.sh` 已加 tar 全量列举校验、keystore 已参数化、
+      整包 deps 缓存已移除（每轮完整重编），x264 / rnnoise 跟随 `master` 的
+      上游更新会自动生效。**残留**：`apksigner`/`aapt2` 仍用
+      `sort -V | tail -1` 取最新。
 
 **代码风格**（见上面「代码风格」一节，按影响排序）
 

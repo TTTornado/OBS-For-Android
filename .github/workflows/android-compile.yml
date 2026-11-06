@@ -133,47 +133,21 @@ jobs:
           fi
           echo "NDK_ROOT=$SDK/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
 
-      - name: 恢复依赖缓存
-        id: deps-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            android/deps-android/prebuilt
-            ~/deps-work/state
-          # 故意不加 restore-keys：依赖版本一变（versions.sh 参与 hash）就必须整份重建，
-          # 否则会把旧缓存捞回来，build.sh 看到旧 stamp 直接跳过，产物还是旧版本。
-          # NDK 版本也进 key：依赖是用某个 NDK 编出来的，换 NDK 必须整份重建 ——
-          # 否则会出现"新 NDK 编 libobs + 旧 NDK 编的 prebuilt"这种混用，
-          # libc++_shared / unwinder 的 ABI 对不上，运行时才炸。
-          key: deps-${{ env.ABI }}-ndk${{ env.NDK_VERSION }}-${{ hashFiles('android/deps-android/versions.sh', 'android/deps-android/defs.sh') }}
-
-      # 缓存命中时 fetch 和 build 都可以整体跳过：prebuilt + ~/deps-work/state 都缓存了，
-      # 而后续步骤只用 prebuilt（compile-check.sh 的 PREFIX_PATH），不再需要源码。
-      # 之前 fetch 每次都跑（约 8 秒的网络检查），build 靠 stamp 秒过 —— 现在都省掉。
+      # 每轮都完整跑：CI runner 是全新环境，既没有 prebuilt 也没有
+      # ~/deps-work/state，build.sh 的 stamp 不会命中。
+      # 整包 deps 缓存（actions/cache 存 prebuilt + stamp）已移除：它曾让
+      # master 的上游更新被旧产物挡住，也让「改了脚本但 key 不变」难排查。
+      # 依赖跟随 master，上游一提交就会进入这一轮的源码并完整重编。
       - name: 下载依赖源码
-        if: steps.deps-cache.outputs.cache-hit != 'true'
         run: bash android/deps-android/fetch.sh
         env:
           OBS_PROXY: ''          # CI 直连，不走代理
 
       - name: 交叉编译依赖
-        if: steps.deps-cache.outputs.cache-hit != 'true'
         run: bash android/deps-android/build.sh "${ABI}"
         env:
           NDK: ${{ env.NDK_ROOT }}
           JOBS: 4
-
-      # 用 cache/save 显式保存，而不是依赖 actions/cache 的 post 步骤：
-      # post 步骤在 job 失败时会被跳过（首次运行就是 skipped），
-      # 那样后面编译一失败就得重编 30 分钟的依赖。
-      - name: 保存依赖缓存
-        if: always() && steps.deps-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            android/deps-android/prebuilt
-            ~/deps-work/state
-          key: deps-${{ env.ABI }}-ndk${{ env.NDK_VERSION }}-${{ hashFiles('android/deps-android/versions.sh', 'android/deps-android/defs.sh') }}
 
       - name: 磁盘实况（依赖构建后）
         run: |
