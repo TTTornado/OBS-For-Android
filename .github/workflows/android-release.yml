@@ -23,12 +23,11 @@ on:
     tags:
       - 'v*'
 
-permissions:
-  contents: write
-
 jobs:
   build:
     # 复用主 workflow：依赖编译、编译验证、打 APK 三步都在那边，这里不重复写。
+    permissions:
+      contents: read
     uses: ./.github/workflows/android-compile.yml
     # workflow_call 默认**不继承** secrets：不写这一行，被调用 workflow 拿不到
     # 任何 secret，release keystore 也就传不进去。等价写法是显式列出 secrets 映射。
@@ -38,10 +37,12 @@ jobs:
     name: 发布 pre-release
     needs: build
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.3.0
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: OBS-Android-apk
           path: dist

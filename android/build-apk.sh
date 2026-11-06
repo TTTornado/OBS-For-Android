@@ -180,6 +180,7 @@ echo "     平台: $ANDROID_PLATFORM"
 # ---------------------------------------------------------------- 4) 签名
 APK="$(find "$AB/build/outputs/apk" -name '*.apk' ! -name '*-signed*' 2>/dev/null | head -1)"
 [ -n "$APK" ] || die "androiddeployqt 没产出 APK（找 $AB/build/outputs/apk）"
+[ -s "$APK" ] || die "androiddeployqt 产出的 APK 为空：$APK"
 
 KS="${KEYSTORE:-}"
 if [ -z "$KS" ]; then
@@ -207,7 +208,7 @@ cp -f "$APK" "$SIGNED"
 # ---------------------------------------------------------------- 5) 归档 + 自检
 STAMP="$(date '+%m%d-%H%M')"
 OUT="$ROOT/OBS-Android-$ABI-$STAMP.apk"
-cp -f "$SIGNED" "$OUT"
+cp -f "$SIGNED" "$OUT" || die "归档 APK 失败：$OUT"
 
 AAPT2="$(ls "$SDK"/build-tools/*/aapt2 2>/dev/null | sort -V | tail -1)"
 echo "================ 结果 ================"
@@ -242,4 +243,7 @@ else
 	echo "  !! APK 里没有 $APP_LIB"
 fi
 echo "======================================"
+# 最后兜底：任何一步没能产出非空 APK 都在这里以 1 退出，
+# 绝不能打印 "APK: ..." 之后还自然退出 0（本地构建者会误判成功）。
+[ -s "$OUT" ] || die "没有产出 APK（文件为空或不存在）：$OUT"
 echo "APK: $OUT"

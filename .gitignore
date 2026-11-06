@@ -62,3 +62,11 @@ build-aux/flatpak-github-action-modified-*
 # android/build-apk.sh 构建期把插件 .so 暂存到这里，由 androiddeployqt 打进 APK 的
 # assets/obs-plugins/。是构建产物（几十 MB），不进版本库。
 /frontend/cmake/android/assets/
+
+# fetch.sh 下载的源码 tarball 与 build.sh 交叉编译出的 prebuilt（数百 MB），不入库。
+# 规则必须放在 !/android / !/frontend 放行之后才生效；以 / 开头精确锚定仓库根，
+# 避免误伤已跟踪的 android/deps-android/*.sh。
+/android/deps-android/src/
+/android/deps-android/prebuilt/
+# build-apk.sh 构建期清空的 libs/<abi>/ 暂存目录，同样是构建产物。
+/frontend/cmake/android/libs/
