@@ -279,12 +279,27 @@ out:
 static pthread_mutex_t audio_mx = PTHREAD_MUTEX_INITIALIZER;
 /* 串行化泵线程的 start/stop，与 audio_mx 分工明确：
  *   audio_mx     只保护 audio_sinks 这张表和 audio_users，**绝不覆盖 join**；
- *   audio_life_mx 覆盖"建线程 / join 线程"整段，泵线程自己不碰它。
+ *   audio_life_mx 覆盖"计数增减 + 建线程 / join 线程 + audio_buf/audio_stop 的建拆"整段，
+ *                 泵线程自己不碰它。
  *
  * 之前只有 audio_mx 一把锁：audio_pump_release 在持锁状态下调用 stop，
  * stop 里 pthread_join 等泵线程退出，而泵线程每轮都要 pthread_mutex_lock(&audio_mx)
  * 才能推音频 —— 于是"最后一颗屏幕源销毁"必然死锁（UI/视频线程永久卡住）。
- * 拆成两把锁后，join 期间泵线程仍能拿到 audio_mx 走完最后一轮并看到停止事件。 */
+ * 拆成两把锁后，join 期间泵线程仍能拿到 audio_mx 走完最后一轮并看到停止事件。
+ *
+ * 再补一道（P0-2）：光把 start/stop 放进 audio_life_mx 还不够 —— 计数 audio_users 在
+ * audio_mx 里改、而"要不要起/停"却在锁外判，两颗源 A/B 交叉时 A release 把计数减到 0、
+ * 算出要停却还没停，B acquire 把计数加回 1 并调 start，start 见 audio_thread_started
+ * 仍为 true 直接返回，随后 A 的 stop 把 audio_stop/audio_buf 全拆掉 ⇒ B 的音频静默丢失。
+ * 现在 audio_pump_acquire/release 整段持 audio_life_mx：计数变化与起/停同在一把锁下，
+ * A 的 stop 没走完 B 的 start 进不来，保证"第一颗才起、最后一颗才停"，audio_buf 的建拆
+ * 也不会被另一路撞上。
+ *
+ * 不会死锁的判据（锁顺序）：acquire/release 只在 audio_life_mx 内**短暂嵌套**拿 audio_mx
+ * 改计数，随后立刻放开 audio_mx 才调 start_impl/stop_impl；泵线程只拿 audio_mx、从不碰
+ * audio_life_mx；因此 stop_impl 的 pthread_join 期间主线程只持 audio_life_mx，泵线程仍能
+ * 拿到 audio_mx 走完最后一轮并看到 audio_stop 事件。全链路不存在 audio_mx -> audio_life_mx
+ * 的反向获取，也没有持 audio_mx 去 join 的路径。 */
 static pthread_mutex_t audio_life_mx = PTHREAD_MUTEX_INITIALIZER;
 static DARRAY(obs_source_t *) audio_sinks;
 static long audio_users = 0; /* 要音的源数；与 audio_sinks.num 同增同减，都在 audio_mx 里动 */
@@ -363,7 +378,8 @@ static void *audio_pump_thread(void *param)
 
 /* 只在持锁时调。起不来只是"这一场没有内录"，视频那一路照旧 —— 所以它的失败不进 c->last_error：
  * 那本账记的是"采集开不起来"，混进来会把两件不相干的事说成一件。 */
-/* 调用方必须持有 audio_life_mx（见 audio_pump_start 包装）。 */
+/* 调用方（audio_pump_acquire）必须持有 audio_life_mx；见上面两把锁的注释。
+ * 以 audio_thread_started 判幂等：起失败时它仍为 false，下一次 acquire 会再试（与原行为一致）。 */
 static bool audio_pump_start_impl(void)
 {
 	if (audio_thread_started)
@@ -408,20 +424,16 @@ fail:
 	return false;
 }
 
-/* 起泵。**不要**在持 audio_mx 时调用（见 audio_pump_acquire 的注释）。 */
-static bool audio_pump_start(void)
-{
-	pthread_mutex_lock(&audio_life_mx);
-	const bool ok = audio_pump_start_impl();
-	pthread_mutex_unlock(&audio_life_mx);
-	return ok;
-}
+/* 起/停不再提供"会自己加锁"的包装：计数增减与起停必须同在 audio_life_mx
+ * 一把锁下完成，由 audio_pump_acquire()/audio_pump_release() 持锁后直接调 *_impl()，
+ * 否则 A release 算出要停却还没停、B acquire 把计数加回来并见 started=true 直接返回，
+ * 随后 A 的 stop 拆掉 audio_stop/audio_buf ⇒ B 的音频静默丢失。 */
 
 /* 停泵。**只由最后一颗源的 release 走到这里**，且调用方**不得**持有 audio_mx
  * （否则就是原来的死锁）。先 join 线程再动总线那一格：前端的 stopAudio 会销掉它
  * 复用的那枚 short[]（global ref），而读它的人就是这条线程 —— 顺序反了便是"边读边拆"。
  * 这个顺序同时也是 OBSAndroidPermissions.cpp 里那句"不上锁"的前提。
- * 调用方必须持有 audio_life_mx（见 audio_pump_stop 包装）。 */
+ * 调用方必须持有 audio_life_mx（由 audio_pump_release 持锁后直接调用）。 */
 static void audio_pump_stop_impl(void)
 {
 	if (audio_thread_started) {
@@ -447,35 +459,37 @@ static void audio_pump_stop_impl(void)
 	audio_nonzero_logged = false;
 }
 
-/* 停泵。**不要**在持 audio_mx 时调用（见 audio_pump_release 的注释）。 */
-static void audio_pump_stop(void)
-{
-	pthread_mutex_lock(&audio_life_mx);
-	audio_pump_stop_impl();
-	pthread_mutex_unlock(&audio_life_mx);
-}
-
-/* 一颗源开始要音。在 open_capture 成功的那一刻调 —— 与面同生，因为它依附的是同一份令牌。 */
+/* 一颗源开始要音。在 open_capture 成功的那一刻调 —— 与面同生，因为它依附的是同一份令牌。
+ *
+ * 整段持 audio_life_mx：计数变化与起泵同在一把锁下，避免与 release 的停泵交错
+ * （见上面两把锁的注释）。audio_mx 只在改 audio_sinks/audio_users 时短暂嵌套获取，
+ * 起泵前必须先放开 —— 泵线程每轮要拿 audio_mx，而它不碰 audio_life_mx。 */
 static void audio_pump_acquire(struct screen_source *c)
 {
 	obs_source_t *ref = obs_source_get_ref(c->source);
 	if (!ref) // 源正在销毁：这一格本来就是可省的，不该当成错
 		return;
 
+	pthread_mutex_lock(&audio_life_mx);
+
 	pthread_mutex_lock(&audio_mx);
 	da_push_back(audio_sinks, &ref);
 	audio_users++;
 	pthread_mutex_unlock(&audio_mx);
 
-	/* 起泵放在列表锁外：它要拿 audio_life_mx，建线程不该和 audio_mx 纠缠。
-	 * 起不来就在里面报，这里不改返回值 —— 视频那一路不欠它什么。 */
-	audio_pump_start();
+	/* 起不来就在里面报，这里不改返回值 —— 视频那一路不欠它什么。
+	 * audio_pump_start_impl() 只建线程/动 audio_* 全局，不碰 audio_mx。 */
+	audio_pump_start_impl();
+
+	pthread_mutex_unlock(&audio_life_mx);
 }
 
 /* 一颗源不再要音。没登记过就是空转（close_capture 既可能从没 acquire 过，也可能被调两遍）。 */
 static void audio_pump_release(struct screen_source *c)
 {
 	bool need_stop = false;
+
+	pthread_mutex_lock(&audio_life_mx);
 
 	pthread_mutex_lock(&audio_mx);
 	const size_t idx = da_find(audio_sinks, &c->source, 0);
@@ -487,10 +501,14 @@ static void audio_pump_release(struct screen_source *c)
 	}
 	pthread_mutex_unlock(&audio_mx);
 
-	/* 必须在锁外停泵：stop 里要 join 泵线程，而泵线程每轮都要拿 audio_mx ——
-	 * 在锁内 join 就是死锁（P0-1：最后一颗源销毁时 UI/视频线程永久卡住）。 */
+	/* 必须在 audio_mx 之外停泵：stop_impl 里 pthread_join 等泵线程退出，
+	 * 而泵线程每轮都要拿 audio_mx —— 持 audio_mx 去 join 就是死锁
+	 * （P0-1：最后一颗源销毁时 UI/视频线程永久卡住）。此时仍持有
+	 * audio_life_mx，但泵线程不碰这把锁，join 能正常完成。 */
 	if (need_stop)
-		audio_pump_stop();
+		audio_pump_stop_impl();
+
+	pthread_mutex_unlock(&audio_life_mx);
 }
 
 /* 属性页那一行：伴音这条路通不通，用户只能从这里看见（ mixer 表在别的窗口里）。
