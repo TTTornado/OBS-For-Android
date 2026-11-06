@@ -12,7 +12,7 @@ OBS Studio 的 Android 移植，基于上游 **33.0.1**。
 
 - 录制（MP4 / MKV）
 - 推流（RTMP）
-- 音频编码：AAC（FFmpeg / FDK-AAC）
+- 音频编码：AAC（FFmpeg 原生编码器）
 - 滤镜与转场
 
 ## 界面
@@ -28,12 +28,12 @@ OBS Studio 的 Android 移植，基于上游 **33.0.1**。
 
 ## 安装
 
-- **arm64-v8a**，Android 8.0（API 29）及以上
-- 签名用的是临时 debug keystore：**升级前需要先卸载旧版**（配置会丢）
+- **arm64-v8a**，Android 10（API 29）及以上
+- 默认用临时 debug keystore 签名：**升级前需要先卸载旧版**（配置会丢）。
+  若发布时配置了固定的 release keystore（见 `PORTING.md`「签名」一节），则可覆盖安装。
 
 ## 注意
 
 这是 pre-release。已知问题：
 
-- 有源在渲染时拖动浮动面板（dock）可能崩溃
 - 部分二级子菜单点击位置偏移（如 视图 → 打开多视图 → 显示器 1）

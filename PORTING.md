@@ -29,7 +29,7 @@
 
 **`compile`（依赖 + 编译验证，不带 Qt）**
 
-- 15 个第三方依赖的交叉编译（`android/deps-android/`），结果存 `actions/cache`
+- 14 个第三方依赖的交叉编译（`android/deps-android/`），结果存 `actions/cache`
 - libobs / libobs-opengl(GLES) / 全部 `android-*` 采集插件的编译与链接
 - 用 `-DENABLE_FRONTEND=OFF` 单独验证「原生层不依赖 Qt」这条声明
 - 产出 `android-native-libs` artifact（`.so` 清单 + `libobs.so` 的 `main` 符号）
@@ -278,7 +278,8 @@ $OBS_ROOT_PATH/lib/*.so                      （解压到应用私有目录）
   `PrepareAndroidRuntimePaths()` 跑在 `main()` 最前面（QApplication 之前），那时 `assets:`
   不可用。所以由 loader 在装载前调 `EnsureAndroidPluginBinaries()`（幂等，只成功才置位）。
 * **装载器不再用编译期白名单**：就是 `obs_load_plugins()` + `os_glob($ROOT/lib/*.so)`。
-  路径由 `libobs/obs-android.c` 的 `add_default_module_paths()` 注册，模板与桌面一致：
+  路径**不在 libobs 侧注册**：由 `frontend/plugin-manager/PluginModuleLoader_Android.cpp` 的
+  `loadPlugins()` 直接构造 `ModuleLoadInfo` 喂给 `obs_load_plugins()`，模板与桌面一致：
   `bin=$ROOT/lib`、`data=$ROOT/share/obs/obs-plugins/%module%`。
 
 ### 谁是 core、谁是 plugin
@@ -292,7 +293,7 @@ Android 上据此分两类：
 
 | 类别 | 谁 | 装载类型 | 在插件管理器里 |
 |---|---|---|---|
-| **core** | 8 个上游插件（image-source / obs-x264 / obs-filters / obs-transitions / text-freetype2 / rtmp-services / obs-outputs / obs-ffmpeg）+ obs-libfdk | `CORE` | 不显示，也不可禁用 |
+| **core** | 8 个上游插件（image-source / obs-x264 / obs-filters / obs-transitions / text-freetype2 / rtmp-services / obs-outputs / obs-ffmpeg） | `CORE` | 不显示，也不可禁用 |
 | **plugin** | 4 个移植自有采集插件（android-audio / android-camera / android-capture / android-screen） | `PLUGIN` | **显示，可禁用**（重启生效） |
 
 为什么这样分：core 留给"随包发布的必需功能"，禁用会直接把应用弄残（禁 obs-x264 就没法录）；
@@ -303,6 +304,14 @@ Android 上据此分两类：
 `set_obs_core_modules()` 之前，把这 4 个从 `OBS_MODULES_ENABLED` 里 `list(REMOVE_ITEM)` 掉
 —— 它们就不进 `obs_core_modules[]`，随后由 `loadPlugins()` 以 PLUGIN 装载。
 （`obs-encode-sink` 是 CI 用的测试 sink、`nikon-source` 已不维护，两者都已从工程删除。）
+
+> **`obs-libfdk` 不随包分发**：FDK-AAC 的许可与 GPLv2-or-later 的 OBS 不兼容，版权文件明写
+> "incompatible with any version of the GNU GPL"、且不授予任何专利许可（Debian 归 non-free，
+> [GNU 许可证列表](https://www.gnu.org/licenses/license-list.html.en#fdk) 亦列为 GPL-incompatible）。
+> OBS 上游的 `option(ENABLE_LIBFDK ...)` 默认就是 OFF；本移植更彻底——Android 白名单里
+> **没有** `add_subdirectory(obs-libfdk)`，连这个 option 都不会被求值，也不编译 `fdk-aac`
+> 依赖。AAC 编码由 `obs-ffmpeg` 的原生编码器提供（`obs-ffmpeg.c` 的 `ffmpeg_aac`），
+> 关掉 FDK 不损失任何 AAC 能力。
 
 > 顺序很关键：这一步必须在 `add_subdirectory()` **之后** —— `target_install_resources()`
 > 是在 `add_subdirectory()` 期间按"是否在 `OBS_MODULES_ENABLED` 里"决定插件数据放
@@ -492,15 +501,16 @@ Qt 在 Android 上的逻辑像素 = dp，所以固定的 32（行高）、48（�
 
 ## 构建速度
 
-apk job 冷缓存时 6.2 分钟，大头在「构建 + 打包 + 签名」。拆开看：
+以 2026-11-06 的 [CI run #88](https://github.com/TTTornado/OBS-For-Android/actions/runs/42153137504)
+（deps 缓存失效、全量重建）的日志时间为准：
 
 | 阶段 | 耗时 |
 |---|---|
-| CMake configure | ~20–40s |
-| ninja 编译 453 个目标 | ~225s（冷缓存；ccache 热起来后多数变命中） |
-| Gradle 第一次（下载 gradle 发行包 + 起 daemon + packageRelease） | ~80s |
-| Gradle 第二次（带插件重打包，增量） | ~6s |
-| 其余（拷插件、签名、上传） | ~20s |
+| 下载 14 个依赖源码 + tar 完整性校验 | ~16s |
+| **全量交叉编译 14 个依赖** | **~4.1 分钟**（02:53:43 → 02:57:50） |
+| apk job（Qt 前端 + 打包 + 签名） | ~2.5 分钟 |
+
+旧版文档与审查报告里的耗时估计均已作废，以本表引用的 CI 日志为准。
 
 ### 已做
 
@@ -517,16 +527,9 @@ workflow 用 `actions/cache` 缓存 `~/.gradle/wrapper` 和 `~/.gradle/caches`�
 按「预处理后的源码 + 编译器 + 完整编译选项」的内容哈希复用 `.o`：改选项、改头文件、
 换分支都自动失效；**只会"没命中→变慢"，不会"该编没编→产物是旧的"**。
 
-实测（同一提交重跑，热缓存）：
-
-| | 冷缓存 | 热缓存 |
-|---|---|---|
-| apk job | 6.6 min | **2.6 min** |
-| 构建 + 打包 + 签名 | 359s | **112s** |
-
-ninja 仍然是 414 次"编译"——它只看 mtime，git checkout 之后永远认为全部过期；
-但每次都是 ccache 命中，所以很快。**这正是 ccache 和 build 目录缓存的本质区别**：
-前者把"误判为需要重编"变成廉价操作，后者要靠我们自己消除误判。
+实测（[CI run #87](https://github.com/TTTornado/OBS-For-Android/actions/runs/41996390159)，热缓存）：
+compile job 命中率 72.75%、apk job 74.92%。ninja 每次仍按 mtime 认为目标全部过期，
+但每次都是 ccache 命中，所以只是多跑一次内容哈希、不会真正重编。
 
 四个配置，缺一个就全 miss（等于没装）：
 
@@ -543,64 +546,19 @@ ninja 仍然是 414 次"编译"——它只看 mtime，git checkout 之后永远
 workflow 里还有一步 `ccache -s` 把命中率打出来 —— ccache 配错时**不报错、只是变慢**，
 没有这个数字你分不清"配好了"和"根本没生效"。
 
-### 试过并放弃：直接缓存 build 目录（`build-android-apk-arm64-v8a/`）
-
-**能压到 1.1 分钟，但正确性要靠我们自己维护，所以放弃了。**
-
-它确实更快（命中后 ninja 几乎不编、连 configure 都省），但踩了三个坑：
-
-1. **恢复成功 ≠ 生效**。ninja 按 mtime 判断，`git checkout` 把源文件刷成"现在"、`.o` 是旧的
-   ⇒ 453 个目标全量重编（实测 414/414，收益 0）。要按"缓存那次构建的提交"把 mtime 调回去，
-   且 checkout 得 `fetch-depth: 0`。
-2. `pip install git-restore-mtime` 在 runner 上**装不上**（PyPI 没这个包）。
-3. 就算 mtime 修对了，**`cmake configure` 每次重跑**会重新生成 `obsconfig.h` 之类的头文件、
-   mtime 刷成"现在"，又带起 296 个重编 —— 还得补一个"CMake 输入没变就跳过 configure"。
-
-补完这三层能到 1.1 分钟，但整套逻辑的隐含前提是「`git diff` 能覆盖所有构建输入」。实际覆盖不住：
-
-* 改 `compile-check.sh` 里的 `-D` 选项、改 workflow 里的 `API` / `BUILD_TYPE` —— key 不变、
-  diff 不匹配，会**跳过 configure 静默用旧配置**；
-* `deps-android` 的 prebuilt 换了但脚本没改 —— key 里没有 deps hash，会复用旧构建目录。
-
-**这类错误不报错，只悄悄打出旧产物。** ccache 内容寻址，改 flags 自动失效，只会变慢不会变错，
-所以换成了 ccache。
-
-### 试过但回退：用 Release（`-O3`、无 `-g`）构建
-
-**结论是反的 —— 更慢，已回退。**
-
-| | RelWithDebInfo（现状） | Release |
-|---|---|---|
-| apk 构建+打包+签名 | 351s | **413s（+62s）** |
-| APK 体积 | 44.1 MB | **44.3 MB（没变）** |
-
-* 体积没变：**`-g` 的调试符号在 Gradle 打包时就已经 strip 掉了**（这也解释了为什么
-  debuggable 和非 debuggable 两个包的 `.so` 字节级相同）。想靠优化级别瘦身是徒劳的。
-* 变慢：`-O3` 比 `-O2` 编译开销大。
-
-所以 `build-apk.sh` **不传** `BUILD_TYPE`，沿用 `compile-check.sh` 的默认 `RelWithDebInfo`。
-
 ### 还没做
 
 | 项 | 预期收益 | 说明 |
 |---|---|---|
-| 提高 apk job 的命中率（目前 48.67%） | 106s 还能再降 | 未查。怀疑 frontend 那批 C++ / moc 的某个输入每轮都在变（如 build number 宏）。**不影响正确性**，只是少省几秒 |
+| 继续提高 ccache 命中率（现约 75%） | 收益有限 | 剩余未命中的主要是每轮变化的生成输入（如 build number 宏）。**不影响正确性** |
 | 合并 compile / apk 两个 job | 省一次 libobs 重复编译 | 会失去「快速失败闸门」，不划算 |
 
 ### 两个 job 共用 ccache：只有 apk job 保存
 
 两个 job 用**同一套 key 格式**、**逐字相同的 ccache 配置**，这样一份缓存两边都能命中。
-但**只有 apk job 保存**，compile job 只恢复不保存。
-
-原因是踩过一个坑：key 里带 `github.sha`，同一轮提交两个 job 算出来的 key **完全相同**，
-后保存的会被拒绝：
-
-```
-Failed to save: Unable to reserve cache with key ..., another job may be creating this cache.
-```
-
-实测是 compile job 先赢（它先跑），于是 apk job 那 414 个 frontend `.o` **从来没进过缓存**，
-缓存永远停在只有 libobs/插件的那一小份 —— 最终 apk job 命中率只剩 33%，比不共享还差。
+但**只有 apk job 保存**，compile job 只恢复不保存：两个 job 的 key 带 `github.sha`、
+同一轮完全相同，若都保存会互相抢（`Failed to save: Unable to reserve cache with key ...`），
+而 apk job 编的是超集，让它做唯一写入方最简单也最准。
 
 现在的分工：
 
@@ -652,14 +610,23 @@ Release notes 在 `.github/release-notes.md`，改文案改那里。
 必须**单调递增** —— 否则系统拒绝安装更新（`INSTALL_FAILED_VERSION_DOWNGRADE`），
 用户只能卸载重装，而卸载会丢配置和场景。
 
-### 签名：pre-release 用临时密钥，正式版必须换
+### 签名：默认临时 debug 密钥，正式版用固定的 release keystore
 
-现在 `android/build-apk.sh` 每次构建都**现生成一个新的 debug keystore**
-（`--ks-key-alias androiddebugkey`）。pre-release 阶段可以接受，代价是
-**用户升级前必须先卸载**（签名不匹配装不上），配置会丢。
+`android/build-apk.sh` 的签名参数已全部参数化（`KEYSTORE` / `KS_ALIAS` / `KS_PASS` /
+`KEY_PASS`），四个默认值逐字等于原来的 `androiddebugkey` / `android` —— 不提供任何环境变量
+时行为与旧版一致：每次构建现生成一个临时 debug keystore。代价是**用户升级前必须先卸载**
+（签名不匹配装不上），配置会丢；pre-release 阶段可以接受。
 
-**正式版之前必须换成固定的 release keystore**（存 GitHub Secrets，workflow 里解出来用）。
-否则每个版本都是「另一个应用」，用户永远无法覆盖安装。
+正式版：在仓库/组织 Secrets 配置 `RELEASE_KEYSTORE_B64`（keystore 文件的 base64 编码）、
+`RELEASE_KS_ALIAS`、`RELEASE_KS_PASS`、`RELEASE_KEY_PASS`。`android-release.yml` 用
+`secrets: inherit` 把它们传给 `android-compile.yml`（后者在 `workflow_call.secrets` 中声明，
+`required: false`），apk job 把 base64 解到 `$RUNNER_TEMP/release.keystore` 后 export 给
+`build-apk.sh`。四项缺一不可：旧版把别名/密码写死，导致 `KEYSTORE` 逃生舱形同虚设。
+
+> **tag 构建前务必确认这 4 个 secret 已配置**：未配置时「解码 release keystore」
+> 步骤会被跳过（CI 里显示 `skipped`），`build-apk.sh` 打印「生成 debug keystore」后
+> 照常签名 —— **构建成功且没有任何失败或告警**，但 release 包仍无法覆盖安装；
+> 此时 `versionCode` 再单调递增也没用。push / PR / workflow_dispatch 不需要这些 secret。
 
 ### debuggable 必须关
 
@@ -730,21 +697,27 @@ CODESTYLE：新常量用 `kCamelCase`。`OBSApp.cpp` 的 `HOLD_MS` / `MOVE_SLOP`
       **已解决**（见上面「插件分发与加载」一节）。根因是安装时系统只把 `lib*.so` 解到
       `nativeLibraryDir`，而我们的插件名不带 `lib` 前缀 ⇒ 一个都没解出来。改成插件走
       APK 的 `assets/`、启动时解到 `$OBS_ROOT_PATH/lib`、再用 `obs_load_plugins()` 扫目录
-      加载之后，非 debuggable 包实测 **13 个插件、0 失败**，顺带支持用户按需增减插件。
-- [ ] **浮动 dock 崩溃**：有源在渲染时浮动 dock → 新原生窗口销毁 Surface →
-      `makeCurrent(): no EGLSurface` → `QRhiGles2` 失败 → SIGSEGV
-      （`reason=5 (APP CRASH(NATIVE))` status=11）。倾向方案：Android 上直接去掉
-      `DockWidgetFloatable`，一并解决「浮动后找不回」
+      加载之后，非 debuggable 包实测**全部内置插件加载成功、0 失败**（当时 13 个；移除 `obs-libfdk` 后为 12 个），顺带支持用户按需增减插件。
+- [x] ~~**浮动 dock 崩溃**~~ **已修**：Android 上从 `statsDock`（`OBSBasic.cpp`）以及
+      `on_lockDocks_toggled()` / `AddDockWidget()` / `AddCustomDockWidget()`
+      （`OBSBasic_Docks.cpp`）四处 `setFeatures()` 里去掉 `DockWidgetFloatable`，
+      `Closable`/`Movable` 按上游原值保留，桌面不受影响；一并解决「浮动后找不回」。
 - [ ] **嵌套子菜单坐标错位**：`视图 → 打开多视图 → 显示器 1` 点不动。Qt 报的子菜单几何
       （`geo=692x334+163+59`）与实际绘制位置不符，点击落到父菜单。影响所有二级菜单
       （场景列表模式 / 统计 等）；`frontend/utility/AndroidMenuPos.hpp` 只覆盖了部分场景
 - [ ] **剩余 `CLAMP-BLOCKED` 对话框**：高级音频 1100×340、变换 900×280、关于 840×519、
       更新 611×526 … 逐个做源码级放宽。做法：跑一遍主界面打开各个对话框，
       日志里每一条 `CLAMP-BLOCKED` 就是一个待修项
-- [ ] `ObsForegroundService.java` 缺 `microphone` 前台类型（Android 14+ 后台录音静默断）
+- [x] ~~`ObsForegroundService.java` 缺 `microphone` 前台类型~~ **已实现**
+      （`AndroidManifest.xml` 的权限 + `foregroundServiceType`、`ObsForegroundService.java`
+      的 `canMic` 位或 `FOREGROUND_SERVICE_TYPE_MICROPHONE`）。**残留**：类型只在服务启动
+      那一刻判定，先拒后补授 `RECORD_AUDIO`、或 `START_STICKY` 重启后不会重算。
 - [x] `AndroidManifest.xml` `debuggable="true"` —— 已在 `58cc365b` 去掉。**但去掉后暴露出
       上面那条「非 debuggable 包插件全加载失败」的阻塞问题，修好之前不能发 release 包。**
-- [ ] 正式版签名：现在每次构建都现生成 debug keystore，用户升级必须卸载重装（丢配置）。
+- [x] ~~正式版签名~~ **已支持**：`build-apk.sh` 参数化 `KEYSTORE`/`KS_ALIAS`/`KS_PASS`/
+      `KEY_PASS`，`android-release.yml` 用 `secrets: inherit` + apk job 解码注入。
+      **只剩配置**：在 GitHub Secrets 里填那 4 个值，否则 tag 包仍是临时 debug 密钥
+      （见上面「签名」一节）。
 
 ### 未做真机功能验证
 
@@ -752,17 +725,18 @@ CODESTYLE：新常量用 `kCamelCase`。`OBSApp.cpp` 的 `HOLD_MS` / `MOVE_SLOP`
 
 ### 工程债
 
-- [ ] `AndroidInputFilter`（`OBSApp.cpp`，约 500 行含 170 行注释、11 个 case）承担 5 件
-      互不相关的事：长按=右键、BACK=Escape、组合框弹层补丁(P-8)、clamp、QScroller 挂载。
-      建议拆成 4 个单责过滤器
-- [ ] 探针日志 63 处：约 20 处有长期价值、约 21 处是每事件残留。建议加
-      `OBS_ANDROID_PROBE` 运行时开关（默认关），长期项降到 `LOG_DEBUG`
+- [x] ~~`AndroidInputFilter` 承担 5 件事~~ **已拆**成 `AndroidBackKeyFilter` /
+      `AndroidComboPopupFilter` / `AndroidLongPressFilter` / `AndroidWindowFilter` 四个类
+      （`OBSApp.cpp`）。**残留**：`AndroidWindowFilter` 仍同时做 clamp 与挂 `QScroller` 两件事。
+- [x] ~~探针日志加运行时开关~~ **已实现**：`OBSAndroidDisplay.hpp` 的 `OBS_PROBE_LOG`
+      走 `adb shell setprop debug.obs.probe 1`、默认关。**残留**：Java 侧 `lastAction` /
+      `describe()` 等诊断日志仍与业务代码耦合，每事件日志待收敛到 `LOG_DEBUG`。
 - [ ] 容器格式限制 5 处各自编码、预览面所有权 5 处各自实现 —— 收敛成单一入口
-- [ ] CI：缓存 key 已含 `NDK_VERSION`（换 NDK 会整份重建），但仍不含 `API`；
-      `always()` 保存半成品 prebuilt 可能毒化缓存；
+- [ ] CI：deps 缓存 key 仍不含 `API`；`always()` 保存半成品 prebuilt 可能毒化缓存；
       paths 漏了 `deps/**`；`.gitignore` 对 `android/deps-android/{prebuilt,src}` 无规则
-- [ ] 构建可重现性：x264/rnnoise 钉的是 `master` 分支且无 checksum；每次构建新生成 keystore；
-      `apksigner`/`aapt2` 用 `sort -V | tail -1` 取最新
+- [ ] 构建可重现性：`fetch.sh` 已加 tar 全量列举校验、keystore 已参数化；
+      x264 / rnnoise 继续跟随 `master`（上游没有稳定 tag，依赖更新自动生效）。
+      **残留**：`apksigner`/`aapt2` 仍用 `sort -V | tail -1` 取最新。
 
 **代码风格**（见上面「代码风格」一节，按影响排序）
 

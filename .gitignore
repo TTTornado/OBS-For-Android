@@ -30,6 +30,12 @@
 !COMMITMENT
 # 移植说明（本 fork 新增的根级文档，必须显式放行，否则会被上面的 /* 吞掉）
 !/PORTING.md
+# 总体审查报告与分领域报告（本 fork 的审查档案，同样需要显式放行）
+!/REVIEW.md
+!/.review/
+!/.review/*.md
+# 审查过程生成的 diff 快照（体积大、是中间产物）不入库
+/.review/_diff_*.txt
 !CONTRIBUTING.md
 !CODESTYLE.md
 !COPYING
