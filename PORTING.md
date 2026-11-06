@@ -25,19 +25,20 @@
 
 ## CI 覆盖什么、不覆盖什么
 
-`.github/workflows/android-compile.yml` 两个 job：
+`.github/workflows/android-compile.yml` 只有**一个 `build` job**，按阶段顺序执行（前一步失败即中断，不会跑后面的步骤）：
 
-**`compile`（依赖 + 编译验证，不带 Qt）**
+**阶段 1：依赖 + 原生层编译验证（不装 Qt）**
 
 - 14 个第三方依赖的交叉编译（`android/deps-android/`），结果存 `actions/cache`
 - libobs / libobs-opengl(GLES) / 全部 `android-*` 采集插件的编译与链接
-- 用 `-DENABLE_FRONTEND=OFF` 单独验证「原生层不依赖 Qt」这条声明
+- 用 `-DENABLE_FRONTEND=OFF` 单独验证「原生层不依赖 Qt」这条声明 —— 这是**快速失败闸门**：
+  原生层挂掉时 Qt 还没下载
 - 产出 `android-native-libs` artifact（`.so` 清单 + `libobs.so` 的 `main` 符号）
 
-**`apk`（Qt 前端 + 打包）**
+**阶段 2：Qt 前端 + 打包**
 
 - 安装 Qt 6.11.1（Android + 桌面宿主），结果存 cache（key 含版本号）
-- 编译 Qt 前端 → `androiddeployqt` 打包 → debug 签名
+- 编译 Qt 前端 → `androiddeployqt` 打包 → 签名
 - 产出 `OBS-Android-apk` artifact
 
 **不覆盖**：任何运行时行为。相机、UVC、MediaProjection、AAudio、推流在 CI 里都验证不了。
@@ -508,7 +509,7 @@ Qt 在 Android 上的逻辑像素 = dp，所以固定的 32（行高）、48（�
 |---|---|
 | 下载 14 个依赖源码 + tar 完整性校验 | ~16s |
 | **全量交叉编译 14 个依赖** | **~4.1 分钟**（02:53:43 → 02:57:50） |
-| apk job（Qt 前端 + 打包 + 签名） | ~2.5 分钟 |
+| 阶段 2：Qt 前端 + 打包 + 签名 | ~2.5 分钟 |
 
 旧版文档与审查报告里的耗时估计均已作废，以本表引用的 CI 日志为准。
 
@@ -528,7 +529,7 @@ workflow 用 `actions/cache` 缓存 `~/.gradle/wrapper` 和 `~/.gradle/caches`�
 换分支都自动失效；**只会"没命中→变慢"，不会"该编没编→产物是旧的"**。
 
 实测（[CI run #87](https://github.com/TTTornado/OBS-For-Android/actions/runs/41996390159)，热缓存）：
-compile job 命中率 72.75%、apk job 74.92%。ninja 每次仍按 mtime 认为目标全部过期，
+合并前分别测得 72.75% / 74.92%。ninja 每次仍按 mtime 认为目标全部过期，
 但每次都是 ccache 命中，所以只是多跑一次内容哈希、不会真正重编。
 
 四个配置，缺一个就全 miss（等于没装）：
@@ -551,27 +552,15 @@ workflow 里还有一步 `ccache -s` 把命中率打出来 —— ccache 配错�
 | 项 | 预期收益 | 说明 |
 |---|---|---|
 | 继续提高 ccache 命中率（现约 75%） | 收益有限 | 剩余未命中的主要是每轮变化的生成输入（如 build number 宏）。**不影响正确性** |
-| 合并 compile / apk 两个 job | 省一次 libobs 重复编译 | 会失去「快速失败闸门」，不划算 |
 
-### 两个 job 共用 ccache：只有 apk job 保存
+### ccache 缓存
 
-两个 job 用**同一套 key 格式**、**逐字相同的 ccache 配置**，这样一份缓存两边都能命中。
-但**只有 apk job 保存**，compile job 只恢复不保存：两个 job 的 key 带 `github.sha`、
-同一轮完全相同，若都保存会互相抢（`Failed to save: Unable to reserve cache with key ...`），
-而 apk job 编的是超集，让它做唯一写入方最简单也最准。
+单 job 内一次 `actions/cache/restore` + 一次 `actions/cache/save`：key 带 `github.sha`，
+每轮存一份新的，`restore-keys` 前缀命中最近一份。`save` 用 `if: always()`，构建失败
+也把已经编好的 `.o` 留下 —— ccache 是内容寻址的，半份缓存不会污染后续结果。
 
-现在的分工：
-
-| | 恢复 | 保存 |
-|---|---|---|
-| compile job（先跑，只编 libobs + 插件） | ✅ 拿上一轮的完整缓存 | ❌ |
-| apk job（后跑，编的是超集） | ✅ 先拿上一轮的完整缓存 | ✅ 唯一写入方 |
-
-这样两个 job 都能吃到"上一轮的完整缓存"，谁都不抢 key。代价是：如果 apk job 失败，
-这一轮就不更新缓存（`if: always()` 已尽量缓解）。
-
-> 别给它俩各配一个带 job 名的 key —— 那样两边都会存，但 `restore-keys` 只能挑"最近生成的
-> 一份"，结果 apk job 反而可能拿到 compile 那份小缓存。单一写入方更简单也更准。
+早期两个 job 共用 ccache 时会抢同一个 key（`Failed to save: Unable to reserve
+cache with key ...`），合并成单 job 后这个问题不复存在。
 
 ---
 
@@ -620,7 +609,7 @@ Release notes 在 `.github/release-notes.md`，改文案改那里。
 正式版：在仓库/组织 Secrets 配置 `RELEASE_KEYSTORE_B64`（keystore 文件的 base64 编码）、
 `RELEASE_KS_ALIAS`、`RELEASE_KS_PASS`、`RELEASE_KEY_PASS`。`android-release.yml` 用
 `secrets: inherit` 把它们传给 `android-compile.yml`（后者在 `workflow_call.secrets` 中声明，
-`required: false`），apk job 把 base64 解到 `$RUNNER_TEMP/release.keystore` 后 export 给
+`required: false`），build job 把 base64 解到 `$RUNNER_TEMP/release.keystore` 后 export 给
 `build-apk.sh`。四项缺一不可：旧版把别名/密码写死，导致 `KEYSTORE` 逃生舱形同虚设。
 
 > **tag 构建前务必确认这 4 个 secret 已配置**：未配置时「解码 release keystore」
@@ -715,7 +704,7 @@ CODESTYLE：新常量用 `kCamelCase`。`OBSApp.cpp` 的 `HOLD_MS` / `MOVE_SLOP`
 - [x] `AndroidManifest.xml` `debuggable="true"` —— 已在 `58cc365b` 去掉。**但去掉后暴露出
       上面那条「非 debuggable 包插件全加载失败」的阻塞问题，修好之前不能发 release 包。**
 - [x] ~~正式版签名~~ **已支持**：`build-apk.sh` 参数化 `KEYSTORE`/`KS_ALIAS`/`KS_PASS`/
-      `KEY_PASS`，`android-release.yml` 用 `secrets: inherit` + apk job 解码注入。
+      `KEY_PASS`，`android-release.yml` 用 `secrets: inherit` + build job 解码注入。
       **只剩配置**：在 GitHub Secrets 里填那 4 个值，否则 tag 包仍是临时 debug 密钥
       （见上面「签名」一节）。
 

@@ -14,8 +14,8 @@ name: Android pre-release
 #   RELEASE_KS_ALIAS      密钥别名
 #   RELEASE_KS_PASS       keystore 库密码
 #   RELEASE_KEY_PASS      密钥密码
-# 下面用 secrets: inherit 把它们传给被调用的 android-compile.yml，由它在 apk
-# job 里解码成文件、再通过环境变量交给 android/build-apk.sh。
+# 下面用 secrets: inherit 把它们传给被调用的 android-compile.yml，由它在
+# build job 里解码成文件、再通过环境变量交给 android/build-apk.sh。
 # 未配置时被调用 workflow 会回退到临时 debug 密钥（能构建，但禁止用于正式发布）。
 
 on:

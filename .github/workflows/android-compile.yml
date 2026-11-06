@@ -6,8 +6,8 @@ name: Android compile check
 #   * 交叉编译 14 个第三方依赖（deps-android）
 #   * 配置并构建 libobs / libobs-opengl(GLES) / 全部 android-* 采集插件
 #
-# 不做的（都由下面的 apk job 承担）：
-#   * Qt 前端 —— 本 job 用 -DENABLE_FRONTEND=OFF 跳过（见 android/compile-check.sh）
+# 后面各阶段依次完成：
+#   * 第一阶段仍用 -DENABLE_FRONTEND=OFF 验证原生层不依赖 Qt（快速失败闸门）
 #   * APK 打包 / 签名
 #   * 真机行为 —— 相机、UVC、MediaProjection、AAudio、推流都无法在 CI 验证
 #
@@ -79,17 +79,20 @@ env:
   OBS_VERSION_OVERRIDE: '33.0.1'
 
 jobs:
-  compile:
-    name: 依赖 + 编译验证 (arm64-v8a, 无 Qt)
+  build:
+    name: 依赖 + 编译验证 + 打 APK (arm64-v8a)
     runs-on: ubuntu-24.04
     timeout-minutes: 240
 
     env:
-      # 这个 job 不装 Qt，但 ccache 的 key 里要带它：key 必须与 apk job 逐字相同，
-      # 否则两个 job 各存一份、互不命中（实测过：compile 侧会变成 "-qt-"，前缀对不上，
-      # apk job 的 restore-keys 就匹配不到 compile 存的那份）。
       QT_VERSION: '6.11.1'
-
+      QT_ROOT: ${{ github.workspace }}/.qt
+      # release keystore 由 android-release.yml 经 workflow_call.secrets 传入。
+      # 放 job 级 env 才能被下面步骤的 if: 判空（if: 里不能直接引用 secrets.*）。
+      RELEASE_KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
+      RELEASE_KS_ALIAS: ${{ secrets.RELEASE_KS_ALIAS }}
+      RELEASE_KS_PASS: ${{ secrets.RELEASE_KS_PASS }}
+      RELEASE_KEY_PASS: ${{ secrets.RELEASE_KEY_PASS }}
     steps:
       - uses: actions/checkout@v4
 
@@ -180,16 +183,9 @@ jobs:
           du -sh android/deps-android/prebuilt 2>/dev/null || true
           du -sh "${HOME}/deps-work" 2>/dev/null || true
 
-      # ccache：按内容哈希复用 .o。这个 job 编 libobs + 全部插件（C/C++，无 Qt）。
-      #
-      # **本 job 只恢复、不保存。** 踩过坑：两个 job 的 key 完全相同（key 里带
-      # github.sha，同一轮提交两边算出来一模一样），后保存的会被拒绝 ——
-      #   Failed to save: Unable to reserve cache with key ..., another job may be creating this cache.
-      # 实测是 compile job 先赢，于是 apk job 那 414 个 frontend .o 从来没进过缓存，
-      # 缓存永远停在只有 libobs/插件的那一小份。
-      #
-      # 现在唯一写入方是 apk job（它编的是超集）。compile job 用同一个 restore-keys
-      # 前缀拿上一轮的完整缓存，命中率比"自己存一小份"更高。
+      # ccache：按「预处理后的源码 + 编译器 + 完整编译选项」的内容哈希复用 .o。
+      # 改编译选项、换分支、改头文件都自动失效，不需要维护"哪些该重编"的清单。
+      # key 带 github.sha，每轮存一份新的；restore-keys 前缀命中最近一份。
       - name: 恢复 ccache
         uses: actions/cache/restore@v4
         with:
@@ -198,8 +194,8 @@ jobs:
           restore-keys: |
             ccache-${{ env.ABI }}-ndk${{ env.NDK_VERSION }}-qt${{ env.QT_VERSION }}-
 
-      # 配置必须与 apk job 一字不差，否则哈希不同、同一条 .o 也不会命中。
-      # key 里用到的 env.QT_VERSION 见 job 顶部的 env（本 job 不装 Qt，但 key 必须一致）。
+      # 关键配置（弄错会全 miss）：COMPILERCHECK=content / BASEDIR / NOHASHDIR / COMPRESS。
+      # NDK 是解压出来的，不同 runner 上 mtime 不同，按内容判断编译器身份才稳。
       - name: 准备 ccache
         run: |
           set -euo pipefail
@@ -215,22 +211,12 @@ jobs:
             echo "CCACHE_MAXSIZE=3G"
             echo "CCACHE_COMPRESS=true"
           } >> "$GITHUB_ENV"
-
       - name: 编译验证（libobs + GLES + 全部插件，跳过 Qt）
         run: |
           set -o pipefail
           USE_CCACHE=1 bash android/compile-check.sh 2>&1 | tee compile.log
         env:
           NDK: ${{ env.NDK_ROOT }}
-
-      # 这里**故意不保存** —— 见上面「恢复 ccache」那段：两个 job 同 key 会互相抢，
-      # 让 apk job 的 414 个 frontend .o 永远存不进去。缓存的唯一写入方是 apk job。
-      - name: ccache 统计
-        if: always()
-        run: |
-          set -uo pipefail
-          if [ -d "$HOME/.ccache" ]; then du -sh "$HOME/.ccache" || true; fi
-          ccache -s || true
 
       # 归档链接产物：让"到底生成了哪些 .so、多大、符号在不在"可查，
       # 而不是只能从日志里推断。
@@ -267,24 +253,7 @@ jobs:
             build-android-*/plugins/**/*.so
           if-no-files-found: warn
           retention-days: 14
-
-      - name: 失败时上传日志
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: compile-logs
-          path: |
-            compile.log
-            build-android-*/CMakeFiles/CMakeOutput.log
-            build-android-*/CMakeFiles/CMakeError.log
-          if-no-files-found: warn
-          retention-days: 7
-
-      - name: 磁盘实况（结束时）
-        if: always()
-        run: df -h /
-
-  # 阶段 2：打可安装的 APK。
+  # 阶段 2（同一 job 内）：打可安装的 APK。
   #
   # 用 **Qt 6.11.1** —— 与上游 OBS 一致。上游不钉 Qt 版本号，钉的是 obs-deps 的
   # 发布批次（CMakePresets.json 的 "qt6": {"version": "2026-10-23"}），真正的 Qt
@@ -304,45 +273,6 @@ jobs:
   #   ✅ aapt2FromMavenOverride（新版 AGP 够新）
   #   ✅ InstalledPluginRow.cpp 的 QString::fromUtf8 兼容（已与上游一致）
   #   ✅ "收敛 Android 平台"（改成给 androiddeployqt 显式传 --android-platform）
-  apk:
-    name: 打 APK (Qt 6.11.1, arm64-v8a)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 240
-    # 依赖 compile job 先把 deps 缓存存下来（这里 fail-on-cache-miss 强制要求命中）。
-    needs: compile
-
-    env:
-      QT_VERSION: '6.11.1'
-      QT_ROOT: ${{ github.workspace }}/.qt
-      # release keystore 由 android-release.yml 经 workflow_call.secrets 传入。
-      # 放 job 级 env 才能被下面步骤的 if: 判空（if: 里不能直接引用 secrets.*）；
-      # push / PR / workflow_dispatch 直跑时这些 secret 为空字符串，条件步骤跳过，
-      # build-apk.sh 回退 debug 签名，行为不变。
-      RELEASE_KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
-      RELEASE_KS_ALIAS: ${{ secrets.RELEASE_KS_ALIAS }}
-      RELEASE_KS_PASS: ${{ secrets.RELEASE_KS_PASS }}
-      RELEASE_KEY_PASS: ${{ secrets.RELEASE_KEY_PASS }}
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: 磁盘实况
-        run: df -h /
-
-      - name: 安装 NDK ${{ env.NDK_VERSION }}
-        run: |
-          set -euo pipefail
-          SDK="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}"
-          SDKMANAGER="$(command -v sdkmanager || ls -d "$SDK"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1)"
-          [ -n "$SDKMANAGER" ] || { echo "::error::找不到 sdkmanager"; exit 1; }
-          if [ ! -d "$SDK/ndk/$NDK_VERSION" ]; then
-            set +e
-            yes 2>/dev/null | "$SDKMANAGER" --install "ndk;$NDK_VERSION" --sdk_root="$SDK"
-            set -e
-          fi
-          [ -d "$SDK/ndk/$NDK_VERSION" ] || { echo "::error::NDK 安装失败"; exit 1; }
-          echo "NDK_ROOT=$SDK/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
-
       # 平台不再靠"卸载 SDK 里的其它平台"来逼 androiddeployqt 选对 ——
       # 现在由 android/build-apk.sh 显式传 --android-platform android-36。
       # 显式参数比"读 settings 键 + 扫目录兜底"这条隐式链可靠：runner 上装了什么平台、
@@ -356,15 +286,6 @@ jobs:
       # 只能靠让 platforms/ 里只剩一个平台来逼它；而它的探测是反向字典序取第一个，
       # 会挑到 android-36-ext19 / android-34-ext12 这类 *-ext* 变体。
       # 那一步每次跑要 79 秒，比装 NDK 还贵，已删除。
-
-      - name: 恢复依赖缓存
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            android/deps-android/prebuilt
-            ~/deps-work/state
-          key: deps-${{ env.ABI }}-ndk${{ env.NDK_VERSION }}-${{ hashFiles('android/deps-android/versions.sh', 'android/deps-android/defs.sh') }}
-          fail-on-cache-miss: true
 
       - name: 缓存 Qt
         id: qt-cache
@@ -403,42 +324,6 @@ jobs:
           key: gradle-${{ env.QT_VERSION }}
           restore-keys: |
             gradle-
-
-      # ccache：按「预处理后的源码 + 编译器 + 完整编译选项」的内容哈希缓存 .o。
-      # 与按 mtime 判断的"缓存 build 目录"不同，它是**内容寻址**的：
-      #   错了只会"没命中 → 变慢"，绝不会"该编没编 → 产物是旧的"。
-      # 改编译选项、换分支、改头文件都自动失效，不需要我们维护任何"哪些该重编"的清单。
-      #
-      # 用 restore / save 分开：key 带 github.sha，每轮存一份新的；restore-keys 前缀
-      # 命中最近的一份。用 actions/cache@v4 单件的话 key 固定后缓存就 immutable 了。
-      - name: 恢复 ccache
-        uses: actions/cache/restore@v4
-        with:
-          path: ~/.ccache
-          key: ccache-${{ env.ABI }}-ndk${{ env.NDK_VERSION }}-qt${{ env.QT_VERSION }}-${{ github.sha }}
-          restore-keys: |
-            ccache-${{ env.ABI }}-ndk${{ env.NDK_VERSION }}-qt${{ env.QT_VERSION }}-
-
-      # ccache 的关键配置（弄错会全 miss，等于没装）：
-      #   COMPILERCHECK=content —— NDK 是解压出来的，不同 runner 上 mtime 不同；
-      #     默认按 mtime 判断编译器身份，那样每轮都全 miss。按内容判断才稳。
-      #   BASEDIR + NOHASHDIR —— 把绝对路径归一化，换个 workspace 路径也能命中。
-      - name: 准备 ccache
-        run: |
-          set -euo pipefail
-          if ! command -v ccache >/dev/null 2>&1; then
-            sudo apt-get update -qq && sudo apt-get install -y -qq ccache
-          fi
-          ccache --version | head -1
-          {
-            echo "CCACHE_DIR=$HOME/.ccache"
-            echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE"
-            echo "CCACHE_NOHASHDIR=true"
-            echo "CCACHE_COMPILERCHECK=content"
-            echo "CCACHE_MAXSIZE=3G"
-            echo "CCACHE_COMPRESS=true"
-          } >> "$GITHUB_ENV"
-
       # 原先这里有个"用新版 aapt2 顶替 AGP 7.4.1 自带的"步骤 —— Qt 6.7.3 捆绑的
       # AGP 太旧，解析不了新版平台 android.jar 的 resources table。换成 Qt 6.9.3 后
       # 它自带的 AGP 足够新，该补丁不再需要，已移除。
@@ -477,7 +362,6 @@ jobs:
           bash android/build-apk.sh 2>&1 | tee apk.log
         env:
           NDK: ${{ env.NDK_ROOT }}
-
       # 把命中率打出来。ccache 配错（比如 COMPILERCHECK 用了 mtime）会**静默失效**——
       # 编译慢但什么都不报。这里每次都能看到 cache hit，出问题一眼就知道。
       - name: ccache 统计
@@ -504,7 +388,17 @@ jobs:
           path: OBS-Android-*.apk
           if-no-files-found: error
           retention-days: 30
-
+      - name: 失败时上传日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compile-logs
+          path: |
+            compile.log
+            build-android-*/CMakeFiles/CMakeOutput.log
+            build-android-*/CMakeFiles/CMakeError.log
+          if-no-files-found: warn
+          retention-days: 7
       - name: 失败时诊断
         if: failure()
         run: |
@@ -541,7 +435,6 @@ jobs:
             build-android-apk-*/frontend/android-build/build/outputs/logs/*.txt
           if-no-files-found: warn
           retention-days: 7
-
       - name: 磁盘实况（结束时）
         if: always()
         run: df -h /
