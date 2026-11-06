@@ -33,7 +33,6 @@
 
 #include <QApplication>
 #include <QLineEdit>
-#include <QStyle>
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -628,20 +627,6 @@ void OBSBasicFilters::closeEvent(QCloseEvent *event)
 	obs_display_remove_draw_callback(ui->preview->GetDisplay(), OBSBasicFilters::DrawPreview, this);
 
 	main->SaveProject();
-}
-
-void OBSBasicFilters::showEvent(QShowEvent *event)
-{
-	QDialog::showEvent(event);
-
-	/* 设计高 726 逻辑 px 高于 16:10 横屏的可用高（设备上 667 再减系统栏），
-	 * 底部那条含 addEffectFilter("+") 的工具条和关闭按钮全落在屏外。
-	 * 收高度的做法与 OBSBasicSettings::showEvent 一致，桌面大屏上条件不成立。 */
-	const int titleBarHeight = QApplication::style()->pixelMetric(QStyle::PM_TitleBarHeight);
-	const int maxHeight = round(screen()->availableGeometry().height() - titleBarHeight);
-	if (size().height() >= maxHeight) {
-		resize(size().width(), maxHeight);
-	}
 }
 
 bool OBSBasicFilters::nativeEvent(const QByteArray &, void *message, qintptr *)
