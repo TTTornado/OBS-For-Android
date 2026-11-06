@@ -1,3 +1,20 @@
+/******************************************************************************
+    Copyright (C) 2026 OBS for Android port contributors
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+******************************************************************************/
+
 // P-18 屏幕采集源（MediaProjection + AImageReader）。当前进度：a 授权与前台服务类型接线、
 // b 取帧进预览、c 进白名单/装载清单、d 生命周期与交还（收回、尺寸变化重建、最后一颗源销毁
 // 交还三支都在设备上量过）、e 系统内录（一路一份的泵，下面 P-18-e 那一段）—— **a~e 五条腿已闭**。
@@ -44,8 +61,8 @@
 // ANativeWindow_toSurface 换成 Surface 交给 Java 去 createVirtualDisplay。总线形状与这套取舍
 // 的理由写在 libobs/obs-android.h 的 P-18 段，注册方是前端 OBSAndroidPermissions.cpp。
 
-#include <media/NdkImageReader.h>
 #include <media/NdkImage.h>
+#include <media/NdkImageReader.h>
 
 /* pthread 给泵那条线程与扇出表的互斥量 —— OBS 这一版没有 os_mutex_*，threading.h 自己就是
  * 直接 include <pthread.h> 再往上加 os_event_*；DARRAY 给"哪几颗源在要音"那张表。 */
@@ -174,10 +191,12 @@ static void push_frame(struct screen_source *c, AImage *image)
 		ch += t;
 		t = 0;
 	}
-	if (crop.right > fw)
+	if (crop.right > fw) {
 		cw -= crop.right - fw;
-	if (crop.bottom > fh)
+	}
+	if (crop.bottom > fh) {
 		ch -= crop.bottom - fh;
+	}
 	if (cw <= 0 || ch <= 0) {
 		drop_frame(c, "裁剪矩形不成立", (int)crop.right, (int)crop.bottom);
 		return;
@@ -210,10 +229,12 @@ static void push_frame(struct screen_source *c, AImage *image)
 			const uint8_t *rp = out.data[0] + (size_t)y * row;
 			for (int32_t x = 0; x < cw; x += 16) {
 				const uint8_t a = rp[x * 4 + 3];
-				if (a < amin)
+				if (a < amin) {
 					amin = a;
-				if (a > amax)
+				}
+				if (a > amax) {
 					amax = a;
+				}
 			}
 		}
 		blog(LOG_INFO,
@@ -240,8 +261,9 @@ static void on_image_available(void *context, AImageReader *reader)
 
 	os_atomic_inc_long(&c->in_callback);
 
-	if (os_atomic_load_long(&c->shutting_down) || !reader)
+	if (os_atomic_load_long(&c->shutting_down) || !reader) {
 		goto out;
+	}
 
 	AImage *image = NULL;
 	const media_status_t st = AImageReader_acquireLatestImage(reader, &image);
@@ -344,11 +366,13 @@ static void *audio_pump_thread(void *param)
 		int peak = 0;
 		for (uint32_t i = 0; i < got * audio_ch; i++) {
 			const int v = (audio_buf[i] < 0) ? -(int)audio_buf[i] : (int)audio_buf[i];
-			if (v > peak)
+			if (v > peak) {
 				peak = v;
+			}
 		}
-		if (peak > audio_peak_win)
+		if (peak > audio_peak_win) {
 			audio_peak_win = peak;
+		}
 		if (peak > audio_peak_all) {
 			audio_peak_all = peak;
 			if (!audio_nonzero_logged) {
@@ -359,8 +383,9 @@ static void *audio_pump_thread(void *param)
 		}
 
 		pthread_mutex_lock(&audio_mx);
-		for (size_t i = 0; i < audio_sinks.num; i++)
+		for (size_t i = 0; i < audio_sinks.num; i++) {
 			obs_source_output_audio(audio_sinks.array[i], &out);
+		}
 		pthread_mutex_unlock(&audio_mx);
 
 		audio_frames_total += got;
@@ -382,8 +407,9 @@ static void *audio_pump_thread(void *param)
  * 以 audio_thread_started 判幂等：起失败时它仍为 false，下一次 acquire 会再试（与原行为一致）。 */
 static bool audio_pump_start_impl(void)
 {
-	if (audio_thread_started)
+	if (audio_thread_started) {
 		return true;
+	}
 
 	uint32_t rate = 0, ch = 0;
 	if (!obs_android_screen_start_audio(&rate, &ch)) {
@@ -505,8 +531,9 @@ static void audio_pump_release(struct screen_source *c)
 	 * 而泵线程每轮都要拿 audio_mx —— 持 audio_mx 去 join 就是死锁
 	 * （P0-1：最后一颗源销毁时 UI/视频线程永久卡住）。此时仍持有
 	 * audio_life_mx，但泵线程不碰这把锁，join 能正常完成。 */
-	if (need_stop)
+	if (need_stop) {
 		audio_pump_stop_impl();
+	}
 
 	pthread_mutex_unlock(&audio_life_mx);
 }
@@ -516,17 +543,18 @@ static void audio_pump_release(struct screen_source *c)
 static void audio_state_line(char *out, size_t out_sz)
 {
 	pthread_mutex_lock(&audio_mx);
-	snprintf(out, out_sz, "系统内录：%s，%ld 颗源在要，累计推送 %llu 帧 ≈ %.2f 秒，本场峰值 %d/32767%s。",
-		 audio_thread_started ? "泵在跑" : "未起", audio_users, (unsigned long long)audio_frames_total,
+	snprintf(out, out_sz, obs_module_text("AudioState"),
+		 audio_thread_started ? obs_module_text("AudioThread.Running") : obs_module_text("AudioThread.Stopped"), audio_users, (unsigned long long)audio_frames_total,
 		 (double)audio_frames_total / (double)(audio_rate ? audio_rate : 1), audio_peak_all,
-		 (audio_thread_started && audio_peak_all == 0) ? "（峰值恒 0 = 系统没把任何声音给过来）" : "");
+		 (audio_thread_started && audio_peak_all == 0) ? obs_module_text("AudioPeak.Zero") : "");
 	pthread_mutex_unlock(&audio_mx);
 }
 
 static void close_capture(struct screen_source *c, const char *why)
 {
-	if (!c->reader)
+	if (!c->reader) {
 		return;
+	}
 
 	blog(LOG_INFO, "android-screen: 关掉采集（%s）", why);
 	os_atomic_set_long(&c->shutting_down, 1);
@@ -630,8 +658,9 @@ static bool open_capture(struct screen_source *c)
  * 不需要用户再把源关一次开一次。 */
 static void try_start(struct screen_source *c)
 {
-	if (c->reader || os_atomic_load_long(&c->shutting_down))
+	if (c->reader || os_atomic_load_long(&c->shutting_down)) {
 		return;
+	}
 
 	if (!obs_android_screen_ready()) {
 		set_error(c, "屏幕总线没接线（前端没注册，或注册晚于建源）");
@@ -656,8 +685,9 @@ static void try_start(struct screen_source *c)
 		return;
 	}
 
-	if (!open_capture(c))
+	if (!open_capture(c)) {
 		return;
+	}
 
 	c->consent_asked = false; // 开成了，下一次令牌丢失时允许再问一次
 }
@@ -683,8 +713,9 @@ static void check_live(struct screen_source *c)
 		 * 改分辨率那一瞬确实可能读到个不成立的数。现在的面还在出帧就是还在出帧，下一拍再问。 */
 		return;
 	}
-	if (w == c->width && h == c->height)
+	if (w == c->width && h == c->height) {
 		return;
+	}
 
 	/* 屏幕这一档的宽高与建面那一刻不一样了。VirtualDisplay 的尺寸是 createVirtualDisplay
 	 * 的入参、建成即定死，不会跟着屏幕自己变 —— 唯一的正确处置是按新尺寸重建一块面
@@ -704,7 +735,7 @@ static void check_live(struct screen_source *c)
 static const char *screen_getname(void *unused)
 {
 	UNUSED_PARAMETER(unused);
-	return "屏幕采集（MediaProjection）";
+	return obs_module_text("Name");
 }
 
 static void *screen_create(obs_data_t *settings, obs_source_t *source)
@@ -786,8 +817,9 @@ static void screen_video_tick(void *data, float seconds)
 	/* 一道闸管两件事：开不起来时的退避，与已经在采时那一拍一问的轮询。
 	 * 轮询每拍两回总线往返（问令牌、问尺寸），尺寸那一格在 Java 侧还要现读一次显示模式；
 	 * 按 60Hz 的 tick 跑就是每秒 120 趟，为两件一秒内不会变的事不值这一笔。 */
-	if (now < c->next_try_ns)
+	if (now < c->next_try_ns) {
 		return;
+	}
 	c->next_try_ns = now + RETRY_INTERVAL_NS;
 
 	if (c->reader) {
@@ -816,17 +848,17 @@ static obs_properties_t *screen_properties(void *data)
 
 	if (c && c->reader)
 		snprintf(state, sizeof(state),
-			 "正在采集：%ux%u（向系统要的尺寸），已送出 %llu 帧，丢弃 %llu 帧"
+			 obs_module_text("CapState.Active")
 			 " —— 这一行是打开本对话框时的快照，只在第一帧到手时刷新一次。",
 			 c->width, c->height, (unsigned long long)c->frames_out,
 			 (unsigned long long)c->frames_dropped);
 	else if (c && c->last_error[0])
-		snprintf(state, sizeof(state), "没在采集。最后一次失败原因：%s", c->last_error);
+		snprintf(state, sizeof(state), obs_module_text("CapState.LastError"), c->last_error);
 	else if (c)
-		snprintf(state, sizeof(state), "没在采集（源未 activate，或还没拿到投影令牌）。已送出 %llu 帧，丢弃 %llu 帧",
+		snprintf(state, sizeof(state), obs_module_text("CapState.Inactive"),
 			 (unsigned long long)c->frames_out, (unsigned long long)c->frames_dropped);
 	else
-		snprintf(state, sizeof(state), "总线未接线：拿不到投影令牌，源也没建起来");
+		snprintf(state, sizeof(state), obs_module_text("CapState.NoBus"));
 
 	obs_properties_add_text(props, "cap_state", state, OBS_TEXT_INFO);
 
@@ -856,6 +888,11 @@ struct obs_source_info android_screen_capture_info = {
 };
 
 OBS_DECLARE_MODULE()
+OBS_MODULE_USE_DEFAULT_LOCALE("android-screen", "en-US")
+MODULE_EXPORT const char *obs_module_description(void)
+{
+	return "Screen capture via Android MediaProjection";
+}
 
 bool obs_module_load(void)
 {

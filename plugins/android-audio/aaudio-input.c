@@ -1,3 +1,20 @@
+/******************************************************************************
+    Copyright (C) 2026 OBS for Android port contributors
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+******************************************************************************/
+
 // 阶段 2 第 1 项：AAudio 采集源（内置麦克风 / 有线耳机麦克风）。
 //
 // A4（阶段 2 第 4 项）在它上面加了"选哪台输入设备"：设备 id 只能由 Java 的
@@ -20,8 +37,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <obs-module.h>
 #include <obs-android.h>
+#include <obs-module.h>
 #include <util/platform.h>
 #include <util/threading.h>
 
@@ -118,16 +135,21 @@ struct aaudio_source {
 
 static aaudio_input_preset_t parse_preset(const char *s)
 {
-	if (!s)
+	if (!s) {
 		return AAUDIO_INPUT_PRESET_GENERIC;
-	if (strcmp(s, "camcorder") == 0)
+	}
+	if (strcmp(s, "camcorder") == 0) {
 		return AAUDIO_INPUT_PRESET_CAMCORDER;
-	if (strcmp(s, "voice_recognition") == 0)
+	}
+	if (strcmp(s, "voice_recognition") == 0) {
 		return AAUDIO_INPUT_PRESET_VOICE_RECOGNITION;
-	if (strcmp(s, "voice_communication") == 0)
+	}
+	if (strcmp(s, "voice_communication") == 0) {
 		return AAUDIO_INPUT_PRESET_VOICE_COMMUNICATION;
-	if (strcmp(s, "unprocessed") == 0)
+	}
+	if (strcmp(s, "unprocessed") == 0) {
 		return AAUDIO_INPUT_PRESET_UNPROCESSED;
+	}
 	return AAUDIO_INPUT_PRESET_GENERIC;
 }
 
@@ -161,8 +183,9 @@ static const char *preset_name(aaudio_input_preset_t p)
  * 也会按 NONE 处理 —— 下拉框里照这句话写清楚，别让人以为选了能省电话费。 */
 static int32_t parse_sharing_mode(const char *s)
 {
-	if (s && strcmp(s, "exclusive") == 0)
+	if (s && strcmp(s, "exclusive") == 0) {
 		return AAUDIO_SHARING_MODE_EXCLUSIVE;
+	}
 	return AAUDIO_SHARING_MODE_SHARED;
 }
 
@@ -173,10 +196,12 @@ static const char *sharing_mode_text(int32_t m)
 
 static int32_t parse_perf_mode(const char *s)
 {
-	if (s && strcmp(s, "low_latency") == 0)
+	if (s && strcmp(s, "low_latency") == 0) {
 		return AAUDIO_PERFORMANCE_MODE_LOW_LATENCY;
-	if (s && strcmp(s, "power_saving") == 0)
+	}
+	if (s && strcmp(s, "power_saving") == 0) {
 		return AAUDIO_PERFORMANCE_MODE_POWER_SAVING;
+	}
 	return AAUDIO_PERFORMANCE_MODE_NONE;
 }
 
@@ -194,12 +219,15 @@ static const char *perf_mode_text(int32_t m)
 
 static int32_t parse_mmap_policy(const char *s)
 {
-	if (s && strcmp(s, "never") == 0)
+	if (s && strcmp(s, "never") == 0) {
 		return AAUDIO_POLICY_NEVER;
-	if (s && strcmp(s, "auto") == 0)
+	}
+	if (s && strcmp(s, "auto") == 0) {
 		return AAUDIO_POLICY_AUTO;
-	if (s && strcmp(s, "always") == 0)
+	}
+	if (s && strcmp(s, "always") == 0) {
 		return AAUDIO_POLICY_ALWAYS;
+	}
 	return AAUDIO_UNSPECIFIED;
 }
 
@@ -237,8 +265,9 @@ static void aaudio_settings_apply(struct aaudio_source *data, obs_data_t *settin
 
 static void aaudio_stream_close(struct aaudio_source *data)
 {
-	if (!data->stream)
+	if (!data->stream) {
 		return;
+	}
 
 	aaudio_result_t res = AAudioStream_close(data->stream);
 	if (res != AAUDIO_OK)
@@ -249,8 +278,9 @@ static void aaudio_stream_close(struct aaudio_source *data)
 
 static const char *aaudio_mmap_used_text(AAudioStream *stream)
 {
-	if (!g_mmap.used)
+	if (!g_mmap.used) {
 		return "查询接口缺失(需 API 36)";
+	}
 	return g_mmap.used(stream) ? "是" : "否";
 }
 
@@ -283,15 +313,17 @@ static void aaudio_resolve_device(struct aaudio_source *data, int32_t *out_id)
 	}
 
 	for (int i = 0; i < n; i++) {
-		if (devs[i].id != data->device_id)
+		if (devs[i].id != data->device_id) {
 			continue;
+		}
 
 		*out_id = devs[i].id;
 		data->resolved_type = devs[i].type;
 		blog(LOG_INFO, "aaudio: 已通过总线确认设备 id=%d type=%d（%s），当前清单共 %d 台", (int) devs[i].id,
 		     (int) devs[i].type, devs[i].label[0] ? devs[i].label : devs[i].product, n);
-		if (!devs[i].is_source)
+		if (!devs[i].is_source) {
 			blog(LOG_WARNING, "aaudio: 这台设备清单里标的是 is_source=false，AAudio 大概打不开采集流");
+		}
 		return;
 	}
 
@@ -321,8 +353,9 @@ static bool aaudio_stream_open(struct aaudio_source *data)
 
 	int32_t want_id = AAUDIO_UNSPECIFIED;
 	aaudio_resolve_device(data, &want_id);
-	if (want_id != AAUDIO_UNSPECIFIED)
+	if (want_id != AAUDIO_UNSPECIFIED) {
 		AAudioStreamBuilder_setDeviceId(builder, want_id);
+	}
 
 	/* MMAP 是进程级开关（头文件原话 "This will only affect the current process"），
 	 * 所以只在真要试的那一次打开，开完流马上还原成 UNSPECIFIED（= 默认值），
@@ -369,8 +402,9 @@ static bool aaudio_stream_open(struct aaudio_source *data)
 	if (g_mmap.platform && data->resolved_type >= 0) {
 		int32_t pv = g_mmap.platform(data->resolved_type, AAUDIO_DIRECTION_INPUT);
 		char note[96] = "";
-		if (pv < 0)
+		if (pv < 0) {
 			snprintf(note, sizeof(note), "，即错误 %s", AAudio_convertResultToText(pv));
+		}
 		blog(LOG_INFO, "aaudio: AAudio_getPlatformMMapPolicy(type=%d, INPUT) = %d%s（1=never 2=auto 3=always）",
 		     (int) data->resolved_type, (int) pv, note);
 	}
@@ -407,10 +441,12 @@ static bool aaudio_stream_open(struct aaudio_source *data)
 
 	int32_t burst = AAudioStream_getFramesPerBurst(data->stream);
 	int32_t want = burst * 2;
-	if (want < AAUDIO_MIN_READ_FRAMES)
+	if (want < AAUDIO_MIN_READ_FRAMES) {
 		want = AAUDIO_MIN_READ_FRAMES;
-	if (want > AAUDIO_MAX_READ_FRAMES)
+	}
+	if (want > AAUDIO_MAX_READ_FRAMES) {
 		want = AAUDIO_MAX_READ_FRAMES;
+	}
 	data->read_frames = want;
 
 	data->buf_size = (size_t) want * data->bpf * (size_t) data->nch;
@@ -476,8 +512,9 @@ static void *aaudio_capture_thread(void *param)
 		if (got == 0)
 			continue; /* 超时：没数据，回头再看停止标志 */
 		if (got < 0) {
-			if (got == AAUDIO_ERROR_TIMEOUT)
+			if (got == AAUDIO_ERROR_TIMEOUT) {
 				continue;
+			}
 
 			blog(got == AAUDIO_ERROR_DISCONNECTED ? LOG_WARNING : LOG_ERROR,
 			     "aaudio: AAudioStream_read 返回 %d (%s)，state=%d，准备重开", (int) got,
@@ -486,13 +523,15 @@ static void *aaudio_capture_thread(void *param)
 			/* 不能直接 break：那样 thread_started 仍是 true（只在 aaudio_capture_stop 里清），
 			 * 源看起来还活着却永远没声音 —— 这正是 P0-3「拔插耳机后永久静音」的成因。
 			 * 改为在**本线程内**自愈：关旧流重开，退避重试有限次，期间随时响应停止事件。 */
-			if (os_event_try(data->stop_event) == 0)
+			if (os_event_try(data->stop_event) == 0) {
 				break;
+			}
 
 			bool recovered = false;
 			for (unsigned long i = 1; i <= AAUDIO_MAX_RESTARTS; i++) {
-				if (os_event_try(data->stop_event) == 0)
+				if (os_event_try(data->stop_event) == 0) {
 					break;
+				}
 				os_sleep_ms(500);
 				if (aaudio_recover(data, i)) {
 					recovered = true;
@@ -557,10 +596,12 @@ static void aaudio_capture_stop(struct aaudio_source *data)
 
 static bool aaudio_capture_start(struct aaudio_source *data)
 {
-	if (data->thread_started)
+	if (data->thread_started) {
 		return true;
-	if (!data->stream && !aaudio_stream_open(data))
+	}
+	if (!data->stream && !aaudio_stream_open(data)) {
 		return false;
+	}
 
 	if (pthread_create(&data->thread, NULL, aaudio_capture_thread, data) != 0) {
 		blog(LOG_ERROR, "aaudio: 创建采集线程失败");
@@ -575,7 +616,7 @@ static bool aaudio_capture_start(struct aaudio_source *data)
 static const char *aaudio_getname(void *unused)
 {
 	UNUSED_PARAMETER(unused);
-	return "AAudio 音频输入（Android 麦克风）";
+	return obs_module_text("Name");
 }
 
 static void *aaudio_create(obs_data_t *settings, obs_source_t *source)
@@ -596,8 +637,9 @@ static void *aaudio_create(obs_data_t *settings, obs_source_t *source)
 static void aaudio_destroy(void *ptr)
 {
 	struct aaudio_source *data = ptr;
-	if (!data)
+	if (!data) {
 		return;
+	}
 
 	aaudio_capture_stop(data);
 	os_event_destroy(data->stop_event);
@@ -621,13 +663,15 @@ static void aaudio_update(void *ptr, obs_data_t *settings)
 	struct aaudio_source *data = ptr;
 	bool running = data->thread_started;
 
-	if (running)
+	if (running) {
 		aaudio_capture_stop(data);
+	}
 
 	aaudio_settings_apply(data, settings);
 
-	if (running && obs_source_active(data->source))
+	if (running && obs_source_active(data->source)) {
 		aaudio_capture_start(data);
+	}
 }
 
 static void aaudio_get_defaults(obs_data_t *settings)
@@ -654,22 +698,20 @@ static obs_properties_t *aaudio_properties(void *unused)
 	 * 与 A3 的 USB 摄像头属性页同构。
 	 * 手填的口子并没关死：场景 JSON 里写个清单外的 id，aaudio_resolve_device 会
 	 * 如实说"不在清单里"并回落到系统默认。 */
-	obs_property_t *dev_list = obs_properties_add_list(props, "device_id", "音频输入设备", OBS_COMBO_TYPE_LIST,
-							   OBS_COMBO_FORMAT_INT);
+	obs_property_t *dev_list = obs_properties_add_list(props, "device_id", obs_module_text("DeviceId"),
+							   OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
 
 	struct obs_android_audio_device devs[AUDIO_DEV_MAX];
 	int n = obs_android_audio_enum_devices(devs, AUDIO_DEV_MAX);
 
 	if (!obs_android_audio_ready()) {
-		obs_property_list_add_int(dev_list,
-					  "系统默认输入（音频总线未接通：宿主 App 没注册 obs_android_set_audio_host）", 0);
+		obs_property_list_add_int(dev_list, obs_module_text("DefaultInput.BusNotConnected"), 0);
 	} else if (n < 0) {
-		obs_property_list_add_int(dev_list, "系统默认输入（总线已接通，但宿主送来的快照一条也没解析出来：协议不匹配）",
-					  0);
+		obs_property_list_add_int(dev_list, obs_module_text("DefaultInput.SnapshotFailed"), 0);
 	} else {
 		obs_property_list_add_int(dev_list,
-					  (n == 0) ? "系统默认输入（当前没有音频输入设备；未授予 RECORD_AUDIO 时清单可能为空）"
-						   : "系统默认输入（由 AAudio 自己选）",
+					  (n == 0) ? obs_module_text("DefaultInput.NoDevices")
+						   : obs_module_text("DefaultInput.System"),
 					  0);
 
 		int hidden = 0;
@@ -682,40 +724,44 @@ static obs_properties_t *aaudio_properties(void *unused)
 			}
 			obs_property_list_add_int(dev_list, devs[i].label, devs[i].id);
 		}
-		if (hidden)
+		if (hidden) {
 			blog(LOG_INFO, "aaudio: 总线给了 %d 台，其中 %d 台没进下拉框（id<=0 或 is_source=false）", n, hidden);
-		if (!obs_android_audio_has_permission())
+		}
+		if (!obs_android_audio_has_permission()) {
 			blog(LOG_WARNING, "aaudio: 刷新属性页时 RECORD_AUDIO 未授予 —— 设备名可能读不到，清单也可能不完整");
+		}
 	}
 
-	obs_properties_add_int(props, "sample_rate", "请求采样率（Hz，0 = 交给系统）", 0, 192000, 100);
-	obs_properties_add_int(props, "channels", "请求声道数（1 或 2）", 1, 2, 1);
+	obs_properties_add_int(props, "sample_rate", obs_module_text("SampleRate"), 0, 192000, 100);
+	obs_properties_add_int(props, "channels", obs_module_text("Channels"), 1, 2, 1);
 
-	obs_property_t *p = obs_properties_add_list(props, "input_preset", "输入预设", OBS_COMBO_TYPE_LIST,
-						    OBS_COMBO_FORMAT_STRING);
-	obs_property_list_add_string(p, "generic（通用）", "generic");
-	obs_property_list_add_string(p, "camcorder（摄像机，带自动增益/降噪）", "camcorder");
-	obs_property_list_add_string(p, "voice_recognition（语音识别，尽量原样）", "voice_recognition");
-	obs_property_list_add_string(p, "voice_communication（通话，走回声消除）", "voice_communication");
-	obs_property_list_add_string(p, "unprocessed（不做任何处理）", "unprocessed");
+	obs_property_t *p = obs_properties_add_list(props, "input_preset", obs_module_text("InputPreset"),
+						    OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+	obs_property_list_add_string(p, obs_module_text("InputPreset.Generic"), "generic");
+	obs_property_list_add_string(p, obs_module_text("InputPreset.Camcorder"), "camcorder");
+	obs_property_list_add_string(p, obs_module_text("InputPreset.VoiceRecognition"), "voice_recognition");
+	obs_property_list_add_string(p, obs_module_text("InputPreset.VoiceCommunication"), "voice_communication");
+	obs_property_list_add_string(p, obs_module_text("InputPreset.Unprocessed"), "unprocessed");
 
 	/* 这三条是 A4 要"试出低延迟能报什么"的开关。选项文本里写的都是 AAudio.h 的原话，
 	 * 实得值以开流后回读的那条"输入流已打开"日志为准。 */
-	p = obs_properties_add_list(props, "sharing_mode", "共享模式", OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
-	obs_property_list_add_string(p, "shared（共享，由 AudioFlinger 混音，采样率/格式可能被系统改）", "shared");
-	obs_property_list_add_string(p, "exclusive（独占，延迟最低；同一设备只许一个客户端）", "exclusive");
+	p = obs_properties_add_list(props, "sharing_mode", obs_module_text("SharingMode"), OBS_COMBO_TYPE_LIST,
+				    OBS_COMBO_FORMAT_STRING);
+	obs_property_list_add_string(p, obs_module_text("SharingMode.Shared"), "shared");
+	obs_property_list_add_string(p, obs_module_text("SharingMode.Exclusive"), "exclusive");
 
-	p = obs_properties_add_list(props, "performance_mode", "性能模式", OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
-	obs_property_list_add_string(p, "none（不作特别要求）", "none");
-	obs_property_list_add_string(p, "low_latency（优先低延迟，能否真拿到看回读）", "low_latency");
-	obs_property_list_add_string(p, "power_saving（省电；头文件写明输入流不支持，会按 none 处理）", "power_saving");
+	p = obs_properties_add_list(props, "performance_mode", obs_module_text("PerformanceMode"), OBS_COMBO_TYPE_LIST,
+				    OBS_COMBO_FORMAT_STRING);
+	obs_property_list_add_string(p, obs_module_text("PerformanceMode.None"), "none");
+	obs_property_list_add_string(p, obs_module_text("PerformanceMode.LowLatency"), "low_latency");
+	obs_property_list_add_string(p, obs_module_text("PerformanceMode.PowerSaving"), "power_saving");
 
-	p = obs_properties_add_list(props, "mmap_policy", "MMAP 路径（该接口 API 36 起才有，本插件按 dlsym 结果决定能否设置）",
-				    OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
-	obs_property_list_add_string(p, "unspecified（不碰这个开关，按系统默认）", "unspecified");
-	obs_property_list_add_string(p, "never（强制走传统路径）", "never");
-	obs_property_list_add_string(p, "auto（能用 MMAP 就用，否则回落）", "auto");
-	obs_property_list_add_string(p, "always（必须 MMAP，否则开流失败）", "always");
+	p = obs_properties_add_list(props, "mmap_policy", obs_module_text("MmapPolicy"), OBS_COMBO_TYPE_LIST,
+				    OBS_COMBO_FORMAT_STRING);
+	obs_property_list_add_string(p, obs_module_text("MmapPolicy.Unspecified"), "unspecified");
+	obs_property_list_add_string(p, obs_module_text("MmapPolicy.Never"), "never");
+	obs_property_list_add_string(p, obs_module_text("MmapPolicy.Auto"), "auto");
+	obs_property_list_add_string(p, obs_module_text("MmapPolicy.Always"), "always");
 
 	return props;
 }
@@ -736,6 +782,11 @@ struct obs_source_info aaudio_input_info = {
 };
 
 OBS_DECLARE_MODULE()
+OBS_MODULE_USE_DEFAULT_LOCALE("android-audio", "en-US")
+MODULE_EXPORT const char *obs_module_description(void)
+{
+	return "AAudio audio input source for Android (built-in microphone / wired headset)";
+}
 
 bool obs_module_load(void)
 {
