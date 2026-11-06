@@ -846,19 +846,17 @@ static obs_properties_t *screen_properties(void *data)
 	char state[512];
 	char audio[192];
 
-	if (c && c->reader)
-		snprintf(state, sizeof(state),
-			 obs_module_text("CapState.Active")
-			 " —— 这一行是打开本对话框时的快照，只在第一帧到手时刷新一次。",
-			 c->width, c->height, (unsigned long long)c->frames_out,
-			 (unsigned long long)c->frames_dropped);
-	else if (c && c->last_error[0])
+	if (c && c->reader) {
+		snprintf(state, sizeof(state), obs_module_text("CapState.Active"), c->width, c->height,
+			 (unsigned long long)c->frames_out, (unsigned long long)c->frames_dropped);
+	} else if (c && c->last_error[0]) {
 		snprintf(state, sizeof(state), obs_module_text("CapState.LastError"), c->last_error);
-	else if (c)
+	} else if (c) {
 		snprintf(state, sizeof(state), obs_module_text("CapState.Inactive"),
 			 (unsigned long long)c->frames_out, (unsigned long long)c->frames_dropped);
-	else
-		snprintf(state, sizeof(state), obs_module_text("CapState.NoBus"));
+	} else {
+		snprintf(state, sizeof(state), "%s", obs_module_text("CapState.NoBus"));
+	}
 
 	obs_properties_add_text(props, "cap_state", state, OBS_TEXT_INFO);
 
