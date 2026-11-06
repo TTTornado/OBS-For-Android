@@ -7,6 +7,11 @@
 上游基线是 **33.0.1**（`65c320b`），移植改动叠在它之上，用
 `git log --oneline 33.0.1..HEAD` 看全量。
 
+> **来源与署名**：本仓库提交历史全部以本 fork 维护者身份签署；原始移植来源如上，本文保留该说明。
+> 新增文件统一使用 `Copyright (C) 2026 OBS for Android port contributors` 头；从上游
+> `platform-*.cpp` / `CrashHandler_*.cpp` 派生的文件保留上游作者版权头（GPLv2 要求）。
+> 若要把移植贡献回上游，请先核实原始许可与署名，再自行补 `Co-authored-by`，本仓库不代为声明。
+
 ---
 
 ## 版本矩阵
@@ -502,6 +507,29 @@ Qt 在 Android 上的逻辑像素 = dp，所以固定的 32（行高）、48（�
 
 ---
 
+## GLES 能力矩阵（Android 图形后端）
+
+后端入口是 `libobs-opengl/gl-android.c`（NDK EGL + `ANativeWindow`），CMake 按
+`$<PLATFORM_ID:Android>` 选它，与上游 `gl-cocoa.m` / `gl-windows.c` 同构。GLAD GLES
+生成代码在 `deps/glad-gles/`（3258 行），**生成脚本 `.qoder/gen-glad-gles.sh` 未入库**，
+目前只能靠仓库里的生成物；升级 GLES 版本前需先把生成脚本补进仓库，否则产物不可重现。
+
+| 项 | 现状 |
+|---|---|
+| GLES 版本 | 3.1 必需；3.0 fallback 是死路 |
+| sRGB | `GL_EXT_texture_sRGB_decode` 被当**硬门槛**（缺扩展时 `obs_reset_video()` 整体失败；同文件对 `sRGB_write_control` 却是告警+降级，处理不一致） |
+| 上传 / 回读 | `GS_BGRA` 上传走 `GL_RGBA` + `gl_swap_rb_bgra()` 换序；回读仍用 `GL_BGRA_EXT` 不换序 |
+| 内部格式 | `GS_BGRX` 的 sized internal format 升到 4 通道 `GL_SRGB8_ALPHA8`（3 通道 `GL_SRGB8` 会被驱动拒） |
+| 明确不支持 | P010 / 10-bit、timer query、dmabuf；`GL_CLAMP_TO_BORDER` 静默降级 |
+| GL 常量 | 25 个 `GL_*` 在 `gl-subsystem.h` 重定义/置 0，其中置 0 的常量会让不检查返回值的路径静默失败 |
+| 上下文丢失 | 无 `EGL_CONTEXT_LOST` 恢复；`eglMakeCurrent` 失败仅记日志 |
+| 共享 effect | `libobs/data/{deinterlace_base,format_conversion}.effect` 为 GLES 做了无守卫改写（`float3`→`float4` 等），D3D11 / 桌面 GL / Metal 三后端共用，见 `REVIEW.md` §5 P1-1；更干净的做法是改 `gl-shaderparser.c`，让 effect 回退上游原样。
+
+浮动 dock 的 `makeCurrent(): no EGLSurface` 崩溃主因在 Qt `QRhiGles2` + 前端共享 SurfaceView，
+不在 `gl-android.c`（本层只有加剧因素）。
+
+---
+
 ## 构建速度
 
 以 2026-11-06 的 [CI run #88](https://github.com/TTTornado/OBS-For-Android/actions/runs/42153137504)
@@ -614,10 +642,12 @@ Release notes 在 `.github/release-notes.md`，改文案改那里。
 
 ### 版本号
 
-两处一起改，保持一致：
+**四处**必须一起改，保持一致（早期文档写"两处"，漏了构建侧的默认值）：
 
 | 位置 | 变量 |
 |---|---|
+| `.github/workflows/android-compile.yml` | `env.OBS_VERSION_OVERRIDE` |
+| `android/compile-check.sh` | `OBS_VERSION_OVERRIDE` 的默认值 |
 | `frontend/cmake/os-android.cmake` | `QT_ANDROID_VERSION_NAME` / `QT_ANDROID_VERSION_CODE` |
 | `frontend/cmake/android/AndroidManifest.xml` | `android:versionName` / `android:versionCode` |
 
@@ -750,20 +780,23 @@ CODESTYLE：新常量用 `kCamelCase`。`OBSApp.cpp` 的 `HOLD_MS` / `MOVE_SLOP`
 - [ ] CI：paths 漏了 `deps/**`；`.gitignore` 对 `android/deps-android/{prebuilt,src}` 无规则
 - [ ] 构建可重现性：`fetch.sh` 已加 tar 全量列举校验、keystore 已参数化、
       整包 deps 缓存已移除（每轮完整重编），x264 / rnnoise 跟随 `master` 的
-      上游更新会自动生效。**残留**：`apksigner`/`aapt2` 仍用
-      `sort -V | tail -1` 取最新。
+      上游更新会自动生效。**残留**：`apksigner` / `aapt2` 仍用 `sort -V | tail -1`
+      取最新 —— 这是**有意决定**（版本矩阵注明 build-tools 未钉版本、runner 会升级），
+      不改成钉死版本号；记录在此以免被当成"忘了修"。GLAD GLES 生成脚本未入库见
+      上面「GLES 能力矩阵」。
 
 **代码风格**（见上面「代码风格」一节，按影响排序）
 
-- [ ] C++ 的 `if`/`for`/`while` 缺大括号：约 82 处（`OBSAndroidDisplay.cpp` 18、
-      `OBSAndroidPermissions.cpp` 14、`OBSAndroidUsb.cpp` 12、`android-window-fit.hpp` 9、
-      `OBSAndroidKeepAlive.cpp` 6、`OBSApp.cpp` 过滤器区 22、其余 1）。
-      CODESTYLE 要求「no exceptions」，`.clang-format` 有 `InsertBraces: true` —— 跑一次
-      `clang-format -i` 就能修。**只作用于我们改过的文件，别碰上游文件。**
-- [ ] 平台相关 include 块：约 24 处 `#ifdef __ANDROID__` 包着 `#include`，CODESTYLE 明确禁止。
-      多数可改成无条件包含（被包含的头文件自守卫，如 `android-window-fit.hpp` 非 Android 展开为空），
-      逐个确认后再改。
-- [ ] include 块内未按字母序：18 个新增文件。`.clang-format` 的 `SortIncludes: false`
-      不会自动排序，需要手动或 `clang-format --sort-includes`。
-- [ ] 新常量命名：`OBSApp.cpp` 的 `HOLD_MS` / `MOVE_SLOP` → `kHoldMs` / `kMoveSlop`
-      （CODESTYLE 要求新常量 `kCamelCase`）
+- [x] ~~C++ 的 `if`/`for`/`while` 缺大括号~~ **部分已修**：本轮给 6 个新增文件补了
+      54 处大括号（`frontend/utility/OBSAndroid*.cpp`、`android-window-fit.hpp`、
+      `AndroidRuntimeBootstrap.cpp`）。**残留**：`OBSApp.cpp` 过滤器区等**上游 M 文件**里
+      仍有一批（当初约定「只作用于我们改过的文件，别碰上游文件」），需要本地跑
+      `clang-format -i`（`.clang-format` 有 `InsertBraces: true`）后单独提交。
+- [x] ~~平台相关 include 块~~ **已修**：16 个只含 `#include` 的 `#ifdef __ANDROID__` 块
+      全部去掉宏（块内没有 Android 系统头，被包含的头都有 `#pragma once` 且非 Android
+      展开为空/只有声明）；含代码的混合块（如 `AndroidMenuPos.hpp`）保留。
+- [x] ~~include 块内未按字母序~~ **部分已修**：新增文件的 include 块已按 case-sensitive
+      字母序重排（`.clang-format` 的 `SortIncludes: false` 需手动）。**残留**：上游 M 文件
+      里仍有未排序的块。
+- [x] ~~新常量命名~~ **已修**：`OBSApp.cpp` 的 `HOLD_MS` / `MOVE_SLOP` 已改为
+      `kHoldMs` / `kMoveSlop`（CODESTYLE 要求新常量 `kCamelCase`）。

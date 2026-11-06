@@ -43,6 +43,17 @@
   4. `PORTING.md` 待办里其余工程债（`API` 未进缓存 key、`always()` 毒化缓存、paths 漏 `deps/**`、`.gitignore` 无规则、`apksigner`/`aapt2` 取最新版本）本次按 P0 范围未修。
   5. §5 的 P1/P2 清单（除顺带清理项外）均未实施。
 
+
+### C/D 组清理（2026-11-06）
+
+按维护者确认的边界实施，均为低风险机械项；架构级重构（前端平台委托、`.ui` 双份真相、`__ANDROID__` 宏统一、声明式插件注册）与功能性待办按决定跳过。
+
+**C 组**：`libobs/obs.h` 删除平台 include 块并给 2 个使用 `obs_android_*` 的 .cpp 补直接 include；4 个 `OBSAndroid*.cpp` 去除整文件 `#ifdef`；16 个纯 include 块去宏（含代码的混合块保留）；18 个新增文件统一 GPLv2 版权头，`AndroidRuntimeBootstrap.*` 误署上游作者已修正；`cunminF` 来源只在 `PORTING.md` 说明，未擅自加 `Co-authored-by`；补大括号 54 处、include 字母序重排、`HOLD_MS`/`MOVE_SLOP` → `kHoldMs`/`kMoveSlop`；10 个只有自由函数的 `OBSAndroid*` 从 `widgets/` 移到 `utility/`，同步 16 个 include 引用点与 CMake 清单，消除反向依赖；删除死代码 `android-plugin-modules.h`（生成器 + 模板 + 废弃方案注释）；4 个插件 UI 串改英文 + `obs_module_text()` + locale + `obs_module_description()`（中文注释保留）；`PORTING.md` 补 GLES 能力矩阵专节、版本号四处同步说明、构建可重现性的有意决定说明。
+
+**D 组**：`push` / `pull_request` 的 `paths` 补 `deps/**`、根 `CMakeLists.txt`、`osconfig.cmake`、release workflow；`.gitignore` 忽略 `deps-android/{src,prebuilt}` 与 `frontend/cmake/android/libs/`；`build.sh` 的 `set -e` 子 shell「假成功」修复、`defs.sh` header-only `cp` 加显式检查、`build-apk.sh` 补空 APK 产物检查；`android-release.yml` 顶层 `permissions: contents: write` 收窄到 release job、actions 钉 commit SHA；ccache key 加 `github.run_attempt`，解决同提交 re-run 的 `Cache save failed`。`sort -V | tail -1` 与 glad 生成脚本未入库按决定只做文档说明。
+
+**仍未做**：架构级重构、功能待办（CLAMP 对话框、子菜单、容器/预览面重复实现、探针收敛）、`sort -V` 钉版本、glad 生成脚本入库。
+
 ---
 
 ## 0. 执行摘要（TL;DR）
