@@ -147,6 +147,14 @@ void OBSBasic::on_lockDocks_toggled(bool lock)
 		     : (QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable |
 			QDockWidget::DockWidgetFloatable);
 
+#ifdef __ANDROID__
+	/* 渲染期把 dock 浮成独立原生窗口会销毁当前 Surface：makeCurrent() 拿不到
+	 * EGLSurface → QRhiGles2 初始化失败 → SIGSEGV（PORTING.md「浮动 dock 崩溃」），
+	 * 小屏上浮动后也找不回。仅去掉 Floatable，Movable/Closable 按上游原值保留；
+	 * 桌面不受影响。放在 mainFeatures 派生之前，几个主 dock 一并生效。 */
+	features &= ~QDockWidget::DockWidgetFloatable;
+#endif
+
 	QDockWidget::DockWidgetFeatures mainFeatures = features;
 	mainFeatures &= ~QDockWidget::QDockWidget::DockWidgetClosable;
 
@@ -190,6 +198,11 @@ void OBSBasic::AddDockWidget(QDockWidget *dock, Qt::DockWidgetArea area, bool ex
 		lock ? QDockWidget::NoDockWidgetFeatures
 		     : (QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable |
 			QDockWidget::DockWidgetFloatable);
+
+#ifdef __ANDROID__
+	/* 同上（PORTING.md「浮动 dock 崩溃」）：Android 上不给新增 dock 浮动能力。 */
+	features &= ~QDockWidget::DockWidgetFloatable;
+#endif
 
 	setupDockAction(dock);
 	dock->setFeatures(features);
@@ -259,6 +272,11 @@ void OBSBasic::AddCustomDockWidget(QDockWidget *dock)
 		lock ? QDockWidget::NoDockWidgetFeatures
 		     : (QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable |
 			QDockWidget::DockWidgetFloatable);
+
+#ifdef __ANDROID__
+	/* 同上（PORTING.md「浮动 dock 崩溃」）：Android 上不给新增 dock 浮动能力。 */
+	features &= ~QDockWidget::DockWidgetFloatable;
+#endif
 
 	dock->setFeatures(features);
 	addDockWidget(Qt::RightDockWidgetArea, dock);

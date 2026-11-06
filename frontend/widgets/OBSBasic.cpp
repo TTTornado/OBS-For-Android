@@ -348,8 +348,15 @@ OBSBasic::OBSBasic(QWidget *parent) : OBSMainWindow(parent), undo_s(ui), ui(new 
 
 	statsDock = new OBSDock();
 	statsDock->setObjectName(QStringLiteral("statsDock"));
+#ifdef __ANDROID__
+	/* 渲染期把 dock 浮成独立原生窗口会销毁当前 Surface：makeCurrent() 拿不到
+	 * EGLSurface → QRhiGles2 初始化失败 → SIGSEGV（PORTING.md「浮动 dock 崩溃」），
+	 * 小屏上浮动后也找不回。仅去掉 Floatable，Closable/Movable 按上游原值保留。 */
+	statsDock->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable);
+#else
 	statsDock->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable |
 			       QDockWidget::DockWidgetFloatable);
+#endif
 	statsDock->setWindowTitle(QTStr("Basic.Stats"));
 	addDockWidget(Qt::BottomDockWidgetArea, statsDock);
 	statsDock->setVisible(false);
