@@ -35,20 +35,21 @@
  * OBSApp::loadAppModules() 里（**早于** obs_load_core_modules()）把 APK 的
  * assets/obs-plugins/ 解到 $OBS_ROOT_PATH/lib，这里扫这个目录。
  *
- * 分工：内置插件（obs_core_modules[] 里那 14 个）由
+ * 分工：随包的核心插件（obs_core_modules[]，由 plugins/CMakeLists.txt 的
+ * set_obs_core_modules() 生成，数量随白名单变化、不要写死）由
  * libobs/obs-core-modules-loader-android.c 以 OBS_MODULE_TYPE_CORE 先装载，
- * 所以这里扫到它们时会被 obs-module.c 的"already loaded"检查跳过 ——
- * **只有用户自己放进 $OBS_ROOT_PATH/lib 的插件才在这里以 PLUGIN 类型载入**，
- * 也就只有它们会出现在插件管理器里（与桌面一致）。
+ * 所以这里扫到它们时会被 obs-module.c 的"already loaded"检查跳过；
+ * core 之外的内置插件（4 个 android-* 采集插件）与用户自己放进
+ * $OBS_ROOT_PATH/lib 的插件在这里以 PLUGIN 类型载入、出现在插件管理器里。
  *
  * 以前插件留在 APK 的 lib/<abi>/ 里 —— os_glob() 扫不到 APK 内部，才被迫改成
  * 编译期白名单逐个裸名 dlopen。解到私有目录之后那条限制就不存在了
  * （实测：os_glob 在私有目录正常命中，绝对路径 dlopen 也成功）。
  *
- * 路径由 libobs/obs-android.c 的 add_default_module_paths() 注册，模板相同：
+ * 路径不在 libobs 侧注册：本文件 loadPlugins() 直接用同一套模板构造
+ * ModuleLoadInfo 喂给 obs_load_plugins()：
  *   bin  = $OBS_ROOT_PATH/lib
  *   data = $OBS_ROOT_PATH/share/obs/obs-plugins/%module%
- * 这里用同一个模板再喂一次 obs_load_plugins()。
  *
  * 好处：用户往 $OBS_ROOT_PATH/lib 放一个 .so 就能装插件、删掉就卸载，
  * 不需要重新打包。 */

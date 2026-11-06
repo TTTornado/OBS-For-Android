@@ -17,8 +17,8 @@
 
 /* 3-2 ②：APK 里的数据落到应用私有目录，再用 OBS_ROOT_PATH 公布出来。
  *
- * 为什么前端自己也要做一遍这件事：libobs 的 find_libobs_data_file()/
- * add_default_module_paths()（libobs/obs-android.c）和平台的 GetDataFilePath()
+ * 为什么前端自己也要做一遍这件事：libobs 的 find_libobs_data_file()
+ * （libobs/obs-android.c）和平台的 GetDataFilePath()
  * （utility/platform-android.cpp）读的都是同一个 OBS_ROOT_PATH，谁先要数据谁就要求它
  * 已经就位 —— 而第一次要数据的是 OBSApp 构造之后的 InitLocale()。
  *

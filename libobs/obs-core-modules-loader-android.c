@@ -24,7 +24,7 @@
 #include <android/log.h>
 #include <stdlib.h>
 
-/* 这条路径是启动关键路径：装载失败会让 14 个内置插件变成"普通插件"（出现在插件
+/* 这条路径是启动关键路径：装载失败会让随包的核心插件变成"普通插件"（出现在插件
  * 管理器里）或者干脆缺功能。而 blog() 在 Android 上只写应用私有目录里的日志文件，
  * 非 debuggable 包 run-as 不进去 —— 所以这里额外打一份到 logcat。 */
 #define CORE_LOG(...) __android_log_print(ANDROID_LOG_INFO, "OBS-core", __VA_ARGS__)
@@ -42,11 +42,12 @@
  *      所以内置插件不会出现在"插件管理器"里 —— 与桌面行为一致；
  *   2. core 模块不受用户 disabled 配置影响（obs-module.c:502），不会被误禁用；
  *   3. 之后 loadPlugins() 扫同一个目录时，重复项会被 obs-module.c:516-526 的
- *      "already loaded" 检查跳过 —— 于是只有用户自己放进 $OBS_ROOT_PATH/lib 的插件
- *      才以 PLUGIN 类型载入、才会出现在插件管理器里。
+ *      "already loaded" 检查跳过 —— 于是 core 之外的内置插件（4 个 android-*
+ *      采集插件）与用户自己放进 $OBS_ROOT_PATH/lib 的插件才以 PLUGIN 类型载入、
+ *      才会出现在插件管理器里。
  *
- * 清单 obs_core_modules[] 由 plugins/CMakeLists.txt 的 set_obs_core_modules() 生成。
- * Android 上它正好是那 14 个白名单插件（已在 liblibobs.so 里核对过字符串）。
+ * 清单 obs_core_modules[] 由 plugins/CMakeLists.txt 的 set_obs_core_modules() 生成，
+ * 即白名单里除那 4 个可选采集插件之外的全部模块；具体数量随白名单变化，不要写死。
  *
  * 注意 `find_core_module()` 的 binary 参数**不带扩展名**，函数内部会自己拼
  * get_module_extension()；data 传带 %module% 的模板，由 make_data_directory() 替换。 */
