@@ -147,15 +147,9 @@ if(OS_ANDROID)
   #                       （P-5 已闭环），设置里那 7 个只有 ffmpeg muxer 才支持的封装格式
   #                       （mkv/flv/mov/mpegts/hls…）在 Android 上仍不可选 —— 归 P-6 前端清单。
   add_subdirectory(obs-ffmpeg)
-  #   obs-libfdk       —— FDK-AAC 编码器。默认 ENABLE_LIBFDK=OFF（官方 CI 显式打开），
-  #                       本移植在 compile-check.sh 里打开。依赖 fdk-aac 已随 deps 的
-  #                       output 批次交叉编译（android/deps-android/defs.sh:build_fdk_aac），
-  #                       走 autotools 装出 libfdk-aac.a + fdk-aac.pc，FindLibfdk.cmake
-  #                       两种方式都能认（pkg-config 优先、find_library 兜底）。
-  #                       注意 fdk-aac 是 C++ 实现、我们链的是静态库，而 obs-libfdk 只有
-  #                       C 源文件 —— CMake 会因此选 C 链接器，缺 C++ 运行时符号，
-  #                       所以在它自己的 CMakeLists 里强制 LINKER_LANGUAGE CXX。
-  add_subdirectory(obs-libfdk)
+  # obs-libfdk **不进白名单**：FDK-AAC 的许可与 GPLv2-or-later 的 OBS 不兼容、
+  # 且不授予专利许可（详见 android/compile-check.sh 头部注释与 PORTING.md）。
+  # AAC 编码由 obs-ffmpeg 的原生编码器提供，关掉 FDK 不损失能力。
   # OBS 33.0 新增：obs-core-modules.c 由 set_obs_core_modules() 用 configure_file
   # 生成到 libobs 的 binary 目录，而 libobs/cmake/obs-core-modules.cmake:4 的
   # target_sources 引用的是相对名 obs-core-modules.c —— 不生成就报

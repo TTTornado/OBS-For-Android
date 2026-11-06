@@ -22,6 +22,13 @@
 # 依赖需先准备：
 #   android/deps-android/fetch.sh
 #   android/deps-android/build.sh arm64-v8a
+#
+# 许可证：FDK-AAC（libfdk-aac）使用与 GPL 不兼容的自定义许可，且其版权文件明写
+# "incompatible with any version of the GNU GPL"、不授予任何专利许可；OBS 本体是
+# GPLv2-or-later，因此本移植**不把 obs-libfdk 放进 Android 白名单**
+# （见 plugins/CMakeLists.txt），也不编译 fdk-aac 依赖、不把它打进 APK。
+# AAC 编码由 obs-ffmpeg 的原生编码器提供（obs-ffmpeg.c 的 ffmpeg_aac），
+# 不损失任何 AAC 能力；上游 obs-libfdk/CMakeLists.txt 的 option 默认同样是 OFF。
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -110,7 +117,6 @@ cmake -S "$ROOT" -B "$BUILD" -G Ninja \
   -DENABLE_FRONTEND="$ENABLE_FRONTEND" \
   -DENABLE_SCRIPTING=OFF \
   -DENABLE_HEVC=ON \
-  -DENABLE_LIBFDK=ON \
   "${EXTRA_CC[@]}" \
   "${EXTRA_FE[@]}" \
   "${EXTRA_SDK[@]}" || {
