@@ -7,6 +7,16 @@ name: Android pre-release
 # 那边的 push 触发器带 `paths` 过滤，而 paths 对 tag push 的匹配规则容易出意外
 # —— tag 指向的提交若没改到白名单里的路径，整条流水线根本不会启动，
 # 表现是"打了 tag、什么都没发生"。独立文件只按 tag 触发，不受 paths 影响。
+#
+# 签名：tag 构建应使用固定的 release keystore，否则每个版本都是"另一个应用"、
+# 用户无法覆盖安装。在仓库/组织 Secrets 配置：
+#   RELEASE_KEYSTORE_B64  keystore 文件的 base64 编码内容
+#   RELEASE_KS_ALIAS      密钥别名
+#   RELEASE_KS_PASS       keystore 库密码
+#   RELEASE_KEY_PASS      密钥密码
+# 下面用 secrets: inherit 把它们传给被调用的 android-compile.yml，由它在 apk
+# job 里解码成文件、再通过环境变量交给 android/build-apk.sh。
+# 未配置时被调用 workflow 会回退到临时 debug 密钥（能构建，但禁止用于正式发布）。
 
 on:
   push:
@@ -20,6 +30,9 @@ jobs:
   build:
     # 复用主 workflow：依赖编译、编译验证、打 APK 三步都在那边，这里不重复写。
     uses: ./.github/workflows/android-compile.yml
+    # workflow_call 默认**不继承** secrets：不写这一行，被调用 workflow 拿不到
+    # 任何 secret，release keystore 也就传不进去。等价写法是显式列出 secrets 映射。
+    secrets: inherit
 
   release:
     name: 发布 pre-release

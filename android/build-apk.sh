@@ -13,6 +13,11 @@
 #   ANDROID_SDK_ROOT（必须，apksigner / aapt2 在里面）
 #   NDK / ANDROID_NDK_ROOT（必须）
 #   KEYSTORE       签名用 keystore；缺省则自动生成一个 debug keystore
+#   KS_ALIAS       签名密钥别名，默认 androiddebugkey
+#   KS_PASS        keystore 库密码，默认 android
+#   KEY_PASS       密钥密码，默认 android
+#                  用 release keystore 时须把三项按该密钥的真实值一并覆盖，
+#                  否则别名/密码不匹配，apksigner 会拒绝签名。
 #   DEPS_PREBUILT  依赖 prebuilt 目录，默认 android/deps-android/prebuilt/<abi>
 #   ANDROID_PLATFORM  androiddeployqt 用哪个 SDK 平台编译，默认 android-36
 #   ABI / API / JOBS / BUILD_DIR 同 compile-check.sh
@@ -32,6 +37,11 @@ DEPS="${DEPS_PREBUILT:-$ROOT/android/deps-android/prebuilt/$ABI}"
 QT_DIR="${QT_DIR:-}"
 QT_HOST_PATH="${QT_HOST_PATH:-}"
 SDK="${ANDROID_SDK_ROOT:-}"
+# 签名参数。缺省值逐字等于原来写死在 keytool / apksigner 里的 debug 值：
+# 不提供任何新环境变量时，签名行为与修改前完全一致。
+KS_ALIAS="${KS_ALIAS:-androiddebugkey}"
+KS_PASS="${KS_PASS:-android}"
+KEY_PASS="${KEY_PASS:-android}"
 
 # androiddeployqt 用哪个平台编译。**必须显式给**，不要让它自己扫 SDK 目录：
 #   1. 不显式指定时它会读 deployment settings 里的 android-compile-sdk-version
@@ -176,8 +186,8 @@ if [ -z "$KS" ]; then
 	KS="$BUILD/debug.keystore"
 	if [ ! -f "$KS" ]; then
 		echo "---- 生成 debug keystore ----"
-		keytool -genkeypair -v -keystore "$KS" -alias androiddebugkey \
-			-storepass android -keypass android -keyalg RSA -keysize 2048 -validity 10000 \
+		keytool -genkeypair -v -keystore "$KS" -alias "$KS_ALIAS" \
+			-storepass "$KS_PASS" -keypass "$KEY_PASS" -keyalg RSA -keysize 2048 -validity 10000 \
 			-dname "CN=Android Debug,O=Android,C=US" >/dev/null 2>&1 ||
 			die "keytool 生成 keystore 失败（JAVA_HOME 指向 JDK 17？）"
 	fi
@@ -189,8 +199,8 @@ echo "---- 签名（$APKSIGNER） ----"
 
 SIGNED="${APK%.apk}-signed.apk"
 cp -f "$APK" "$SIGNED"
-"$APKSIGNER" sign --ks "$KS" --ks-key-alias androiddebugkey \
-	--ks-pass pass:android --key-pass pass:android --out "$SIGNED" "$SIGNED" ||
+"$APKSIGNER" sign --ks "$KS" --ks-key-alias "$KS_ALIAS" \
+	--ks-pass "pass:$KS_PASS" --key-pass "pass:$KEY_PASS" --out "$SIGNED" "$SIGNED" ||
 	die "apksigner sign 失败"
 "$APKSIGNER" verify "$SIGNED" || die "apksigner verify 失败"
 

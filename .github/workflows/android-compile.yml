@@ -3,7 +3,7 @@ name: Android compile check
 # 目的：在没有本地环境的情况下，验证 Android 移植的**编译与链接**是否正确。
 #
 # 范围（本 workflow 只做这些）：
-#   * 交叉编译 15 个第三方依赖（deps-android）
+#   * 交叉编译 14 个第三方依赖（deps-android）
 #   * 配置并构建 libobs / libobs-opengl(GLES) / 全部 android-* 采集插件
 #
 # 不做的（都由下面的 apk job 承担）：
@@ -20,6 +20,22 @@ on:
   workflow_dispatch:
   # 允许 android-release.yml 复用本 workflow（tag 触发时调用，不重复写一遍构建步骤）。
   workflow_call:
+    # release keystore 由调用方（android-release.yml）经 secrets: inherit 传入。
+    # 显式声明便于静态查证；required: false 保证 push / PR / workflow_dispatch
+    # 直接触发本 workflow 时无需提供，缺失即回退 build-apk.sh 的 debug 签名。
+    secrets:
+      RELEASE_KEYSTORE_B64:
+        description: base64 编码的 release keystore 文件
+        required: false
+      RELEASE_KS_ALIAS:
+        description: release keystore 的密钥别名
+        required: false
+      RELEASE_KS_PASS:
+        description: release keystore 的库密码
+        required: false
+      RELEASE_KEY_PASS:
+        description: release 密钥本身的密码
+        required: false
   push:
     # main = 正式分支；test/** = 试验分支。
     # 试验分支也要自动构建：不然每次都要手动 workflow_dispatch，很容易忘，
@@ -298,6 +314,14 @@ jobs:
     env:
       QT_VERSION: '6.11.1'
       QT_ROOT: ${{ github.workspace }}/.qt
+      # release keystore 由 android-release.yml 经 workflow_call.secrets 传入。
+      # 放 job 级 env 才能被下面步骤的 if: 判空（if: 里不能直接引用 secrets.*）；
+      # push / PR / workflow_dispatch 直跑时这些 secret 为空字符串，条件步骤跳过，
+      # build-apk.sh 回退 debug 签名，行为不变。
+      RELEASE_KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
+      RELEASE_KS_ALIAS: ${{ secrets.RELEASE_KS_ALIAS }}
+      RELEASE_KS_PASS: ${{ secrets.RELEASE_KS_PASS }}
+      RELEASE_KEY_PASS: ${{ secrets.RELEASE_KEY_PASS }}
 
     steps:
       - uses: actions/checkout@v4
@@ -418,6 +442,26 @@ jobs:
       # 原先这里有个"用新版 aapt2 顶替 AGP 7.4.1 自带的"步骤 —— Qt 6.7.3 捆绑的
       # AGP 太旧，解析不了新版平台 android.jar 的 resources table。换成 Qt 6.9.3 后
       # 它自带的 AGP 足够新，该补丁不再需要，已移除。
+
+      # 把 base64 的 release keystore 解码成文件，并把签名参数写进 $GITHUB_ENV，
+      # 供下一步的 build-apk.sh 读取。if: 的判空用 job 级 env 中转（if: 内不能
+      # 直接引用 secrets.*）。未配置任何 secret 时该步整体跳过 —— 不写 GITHUB_ENV，
+      # 因此 KEYSTORE/KS_ALIAS/KS_PASS/KEY_PASS 都不会被设置，debug 回退生效。
+      - name: 解码 release keystore（仅配置了密钥时）
+        if: env.RELEASE_KEYSTORE_B64 != ''
+        run: |
+          set -euo pipefail
+          KS_FILE="$RUNNER_TEMP/release.keystore"
+          printf '%s' "$RELEASE_KEYSTORE_B64" | base64 -d > "$KS_FILE"
+          [ -s "$KS_FILE" ] || { echo "::error::release keystore 为空或 base64 无效"; exit 1; }
+          chmod 600 "$KS_FILE"
+          {
+            echo "KEYSTORE=$KS_FILE"
+            echo "KS_ALIAS=${RELEASE_KS_ALIAS:-androiddebugkey}"
+            echo "KS_PASS=${RELEASE_KS_PASS:-android}"
+            echo "KEY_PASS=${RELEASE_KEY_PASS:-android}"
+          } >> "$GITHUB_ENV"
+          echo "release keystore 已就绪：别名 ${RELEASE_KS_ALIAS:-androiddebugkey}"
 
       - name: 构建 + 打包 + 签名
         run: |
