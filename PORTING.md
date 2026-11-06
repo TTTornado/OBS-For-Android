@@ -515,6 +515,14 @@ Qt 在 Android 上的逻辑像素 = dp，所以固定的 32（行高）、48（�
 
 旧版文档与审查报告里的耗时估计均已作废，以本表引用的 CI 日志为准。
 
+上表是 deps 层 ccache **冷启动**（全 miss）的代价。2026-11-06 的
+[CI run #92](https://github.com/TTTornado/OBS-For-Android/actions/runs/42177355252)
+把 14 个依赖的编译也接入 ccache 后，`ccache -s` 的可缓存调用从 3910 升到 7704、
+缓存用量 87M → 139M（占 `CCACHE_MAXSIZE=3G` 的 4.75%，无需调大）。第二轮起
+deps 的 `make` 阶段改为哈希查找，预计把 4.1 分钟压到 1.5–2.5 分钟；`configure` /
+`ar` / `make install` 仍要跑，上游 `master` 有更新时该依赖会自然 miss 并重编
+（这正是「依赖更新自动生效」）。
+
 ### 已做
 
 **① 缓存 `~/.gradle`**
@@ -560,6 +568,22 @@ workflow 里还有一步 `ccache -s` 把命中率打出来 —— ccache 配错�
 单 job 内一次 `actions/cache/restore` + 一次 `actions/cache/save`：key 带 `github.sha`，
 每轮存一份新的，`restore-keys` 前缀命中最近一份。`save` 用 `if: always()`，构建失败
 也把已经编好的 `.o` 留下 —— ccache 是内容寻址的，半份缓存不会污染后续结果。
+
+**三层共用一个 `~/.ccache` 与同一份 `CCACHE_*` 配置，注入点按层选**：
+
+| 层 | 注入方式 | 位置 |
+|---|---|---|
+| 主构建（libobs / GLES / frontend） | `CMAKE_{C,CXX}_COMPILER_LAUNCHER=ccache` | `compile-check.sh` |
+| deps 的 CMake 系 6 个 | 同上（NDK toolchain 把编译器设为绝对路径，`$CC` 对它们无效） | `defs.sh:_run_cmake` |
+| deps 的 autotools / x264 / ffmpeg 6 个 | 与真实编译器同名的 wrapper：`exec ccache <real> "$@"`，`CC`/`CXX` 指向它 | `build.sh` |
+
+wrapper 用同名脚本而不是 `CC="ccache <abs>"`，是为了避开 configure 对带空格
+`$CC` 的 `--version` / `test -x` 探测，也不依赖 PATH 或 ccache 的 masquerade 模式。
+`USE_CCACHE=1` 且系统有 ccache 才启用，本地回退原绝对路径。`CCACHE_MAXSIZE=3G`
+保持不变（实测仅 139M）。
+
+> 同一提交的手动 re-run 会因 key 已存在而报 `Cache save failed`，不影响
+> `restore` 命中；正常每次 push 都是新 sha、save 会成功。
 
 早期两个 job 共用 ccache 时会抢同一个 key（`Failed to save: Unable to reserve
 cache with key ...`），合并成单 job 后这个问题不复存在。
