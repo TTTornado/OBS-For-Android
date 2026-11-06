@@ -1,6 +1,22 @@
+/******************************************************************************
+    Copyright (C) 2026 OBS for Android port contributors
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+******************************************************************************/
+
 #include "OBSAndroidKeepAlive.hpp"
 
-#ifdef __ANDROID__
 
 #include <QJniEnvironment>
 #include <QJniObject>
@@ -42,27 +58,31 @@ bool obsAndroidKeepAliveSetRunning(bool running, const char *state, QString *det
 	{
 		std::lock_guard<std::mutex> lk(g_keepAliveMutex);
 		if (!running && !g_running) {
-			if (detail)
+			if (detail) {
 				*detail = QStringLiteral("本来就没在跑，忽略 stop");
+			}
 			return true;
 		}
 		/* 3-5 看门狗每秒复核一次：状态没变就别再惊动 Java（重复 startForeground 会每秒重刷通知）。 */
 		repeat = running && g_running && g_state == what;
 		g_running = running;
-		if (!repeat)
+		if (!repeat) {
 			g_state = what;
+		}
 	}
 
 	if (repeat) {
-		if (detail)
+		if (detail) {
 			*detail = QStringLiteral("已在跑(%1)，忽略重复").arg(what);
+		}
 		return true;
 	}
 
 	const QJniObject act = hostActivity();
 	if (!act.isValid()) {
-		if (detail)
+		if (detail) {
 			*detail = QStringLiteral("拿不到 QtNative.activity() —— 前台服务没起来");
+		}
 		jstatus = obsAndroidKeepAliveStatus();
 		blog(LOG_WARNING, "OBSAndroidKeepAlive[Android]: %s", jstatus.toUtf8().constData());
 		return false;
@@ -85,8 +105,9 @@ bool obsAndroidKeepAliveSetRunning(bool running, const char *state, QString *det
 				     .arg(verb)
 				     .arg(ok ? QStringLiteral("成功") : QStringLiteral("失败"))
 				     .arg(jstatus);
-	if (detail)
+	if (detail) {
 		*detail = line;
+	}
 	blog(ok ? LOG_INFO : LOG_WARNING, "OBSAndroidKeepAlive[Android]: %s", line.toUtf8().constData());
 	return ok;
 }
@@ -94,11 +115,10 @@ bool obsAndroidKeepAliveSetRunning(bool running, const char *state, QString *det
 QString obsAndroidKeepAliveStatus()
 {
 	const QString desc = callDescribe();
-	if (!desc.isEmpty())
+	if (!desc.isEmpty()) {
 		return desc;
+	}
 	/* describe() 调不到（类没进 APK / 静态方法没搜到）时至少把 native 侧的意图报出来，
 	 * 与"服务在跑但 describe 返回空"是两回事。 */
 	return QStringLiteral("describe 空；native 侧期望 running=%1").arg(g_running);
 }
-
-#endif // __ANDROID__

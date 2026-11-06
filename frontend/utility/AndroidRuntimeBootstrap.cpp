@@ -1,5 +1,5 @@
 /******************************************************************************
-    Copyright (C) 2023 by Lain Bailey <lain@obsproject.com>
+    Copyright (C) 2026 OBS for Android port contributors
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -23,8 +23,8 @@
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
-#include <QString>
 #include <QStandardPaths>
+#include <QString>
 
 #include <android/log.h>
 
@@ -123,16 +123,18 @@ constexpr const char *kManagedFile = "/.managed";
 QStringList readLineList(const QString &path)
 {
 	QFile f(path);
-	if (!f.open(QIODevice::ReadOnly))
+	if (!f.open(QIODevice::ReadOnly)) {
 		return {};
+	}
 	return QString::fromUtf8(f.readAll()).split('\n', Qt::SkipEmptyParts);
 }
 
 void writeLineList(const QString &path, const QStringList &items)
 {
 	QFile f(path);
-	if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+	if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
 		return;
+	}
 	QByteArray out;
 	for (const QString &s : items) {
 		out += s.toUtf8();
@@ -155,8 +157,9 @@ bool extractPluginBinaries(const QString &dstRoot)
 	QStringList names;
 	for (const QString &raw : QString::fromUtf8(manifestBytes).split('\n', Qt::SkipEmptyParts)) {
 		const QString name = raw.trimmed();
-		if (!name.isEmpty() && !name.contains('/'))
+		if (!name.isEmpty() && !name.contains('/')) {
 			names << name;
+		}
 	}
 	if (names.isEmpty()) {
 		PKG("插件二进制：MANIFEST 是空的");
@@ -241,8 +244,9 @@ void EnsureAndroidPluginBinaries()
 	 * 注册的，而 PrepareAndroidRuntimePaths() 跑在 QApplication 之前。插件装载发生在
 	 * OBSApp（QApplication 子类）构造之后，所以由 loader 在装载前调这里。 */
 	static bool done = false;
-	if (done)
+	if (done) {
 		return;
+	}
 
 	const char *root = getenv("OBS_ROOT_PATH");
 	if (!root || !*root) {
@@ -270,8 +274,9 @@ void PrepareAndroidRuntimePaths()
 	const QString root = files + "/obsroot";
 	PKG("OBS_ROOT_PATH = %s", root.toUtf8().constData());
 
-	if (!QDir().mkpath(root + "/lib"))
+	if (!QDir().mkpath(root + "/lib")) {
 		PKG("FAIL 建不出 %s/lib", root.toUtf8().constData());
+	}
 
 	unpack("libobs 数据 :/obsdata", QStringLiteral(":/obsdata"), root + "/share/libobs");
 	unpack("前端数据 :/obsfrontenddata", QStringLiteral(":/obsfrontenddata"), root + "/share/obs/obs-studio");

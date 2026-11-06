@@ -1,3 +1,20 @@
+/******************************************************************************
+    Copyright (C) 2026 OBS for Android port contributors
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+******************************************************************************/
+
 /*
  * 预览上屏宿主（路线 B · plan.md §五 3-2③ B-1）
  *
@@ -74,7 +91,7 @@ public final class ObsDisplayHost {
     /** 位置误差小于这个像素数就算贴准 */
     private static final int ALIGN_TOL_PX = 1;
 
-    /* B-8：传给 native 的 surface 事件号，取值顺序必须与 OBSAndroidDisplay.hpp 的
+    /* B-8：传给 native 的 surface 事件号，取值顺序必须与 utility/OBSAndroidDisplay.hpp 的
      * ObsAndroidSurfaceEvent 一致（native 只用它给日志标原因，决策一律看 surfaceSerial() 的现值）。 */
     static final int EVENT_DESTROYED = 0;
     static final int EVENT_CREATED = 1;

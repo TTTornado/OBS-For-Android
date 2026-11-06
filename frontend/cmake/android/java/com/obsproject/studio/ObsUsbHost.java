@@ -1,10 +1,27 @@
+/******************************************************************************
+    Copyright (C) 2026 OBS for Android port contributors
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+******************************************************************************/
+
 /*
  * 无 root 的 USB 设备宿主（自 android-shell/android/java/org/qtproject/example/obs_shell/ObsUsbHost.java
  * 忠实移植，仅改了包名与两条广播 action 的字符串前缀）。
  *
  * 职责边界：这个类只做 Android Framework 那一侧必须做的事 —— 枚举、申请授权、
  * openDevice 拿 fd、监听热插拔。它不理解 OBS，也不链 JNI 符号；native 侧
- * （frontend/widgets/OBSAndroidUsb.cpp）用 QJniObject 静态调这里的 public static 方法，
+ * （frontend/utility/OBSAndroidUsb.cpp）用 QJniObject 静态调这里的 public static 方法，
  * 再通过 libobs 的 obs_android_usb_* 总线转交给采集插件（android-capture/uvc-input.c）。
  *
  * 只 import android.* 与 java.* 这两个包，不 import Qt：Context 由 native 侧用

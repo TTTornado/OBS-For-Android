@@ -18,9 +18,7 @@
 #include "OBSBasicProperties.hpp"
 
 #include <utility/display-helpers.hpp>
-#ifdef __ANDROID__
 #include <utility/android-window-fit.hpp>
-#endif
 #include <widgets/OBSBasic.hpp>
 
 #include <properties-view.hpp>

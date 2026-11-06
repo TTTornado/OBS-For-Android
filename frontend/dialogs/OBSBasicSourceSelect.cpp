@@ -17,9 +17,7 @@
 ******************************************************************************/
 
 #include "OBSApp.hpp"
-#ifdef __ANDROID__
 #include <utility/android-window-fit.hpp>
-#endif
 #include "OBSBasicSourceSelect.hpp"
 
 #include <utility/ResizeSignaler.hpp>

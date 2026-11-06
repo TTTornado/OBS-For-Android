@@ -24,9 +24,7 @@
 #include <utility/BaseLexer.hpp>
 #include <utility/OBSTranslator.hpp>
 #include <utility/platform.hpp>
-#ifdef __ANDROID__
 #include <utility/AndroidRuntimeBootstrap.hpp>
-#endif
 
 #include <qt-wrappers.hpp>
 #include <util/platform.h>

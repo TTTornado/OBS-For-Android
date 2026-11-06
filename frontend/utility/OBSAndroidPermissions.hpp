@@ -1,3 +1,20 @@
+/******************************************************************************
+    Copyright (C) 2026 OBS for Android port contributors
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+******************************************************************************/
+
 // 3-5（plan.md §五）：一期运行时权限的申请口。Java 侧 = ObsPermissionHost.java。
 // 只负责"把系统弹窗弹出来 + 现读状态"，不接 onRequestPermissionsResult（那个回调归 Qt 自己的
 // QtActivityDelegate，插不进去），所以要查结果就在下一次事件里再读一次。

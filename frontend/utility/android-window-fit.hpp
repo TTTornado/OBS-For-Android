@@ -1,3 +1,20 @@
+/******************************************************************************
+    Copyright (C) 2026 OBS for Android port contributors
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+******************************************************************************/
+
 #pragma once
 
 #ifdef __ANDROID__
@@ -6,8 +23,8 @@
 #include <QRect>
 #include <QScreen>
 #include <QSize>
-#include <QWidget>
 #include <QtGlobal>
+#include <QWidget>
 
 /* 把一个顶层窗口缩进屏幕可用区并居中。
  *
@@ -36,17 +53,20 @@ inline AndroidFitResult androidFitTopLevelToScreen(QWidget *w)
 {
 	AndroidFitResult r;
 
-	if (!w || !w->isWindow())
+	if (!w || !w->isWindow()) {
 		return r;
+	}
 
 	/* 弹层/工具提示不参与：它们的位置由 Qt 相对锚点算，硬压进来反而错位。 */
 	const Qt::WindowFlags flags = w->windowFlags();
-	if (flags.testFlag(Qt::Popup) || flags.testFlag(Qt::ToolTip))
+	if (flags.testFlag(Qt::Popup) || flags.testFlag(Qt::ToolTip)) {
 		return r;
+	}
 
 	const QScreen *scr = w->screen();
-	if (!scr)
+	if (!scr) {
 		return r;
+	}
 
 	const QRect avail = scr->availableGeometry();
 	const int margin = 8;
@@ -60,14 +80,17 @@ inline AndroidFitResult androidFitTopLevelToScreen(QWidget *w)
 	/* 满屏窗口（投影仪 / Multiview）不要压：它们本来就该铺满，压到 avail-16
 	 * 再居中的话四周会留一圈黑边。判据必须是"相等"而不是"不小于" —— 后者会把
 	 * 981x512 的设置对话框也当成满屏窗，导致它完全不被压。 */
-	if (w->isFullScreen() || before == scr->geometry().size())
+	if (w->isFullScreen() || before == scr->geometry().size()) {
 		return r;
+	}
 
 	QSize target = before;
-	if (target.width() > maxSize.width())
+	if (target.width() > maxSize.width()) {
 		target.setWidth(maxSize.width());
-	if (target.height() > maxSize.height())
+	}
+	if (target.height() > maxSize.height()) {
 		target.setHeight(maxSize.height());
+	}
 
 	if (target == before)
 		return r; /* 本来就装得下，不动 */
@@ -97,8 +120,9 @@ inline int androidPreviewMinHeight(const QWidget *w)
 {
 	const QScreen *scr = w ? w->screen() : nullptr;
 	const int availH = scr ? scr->availableGeometry().height() : 0;
-	if (availH <= 0)
+	if (availH <= 0) {
 		return 80;
+	}
 	return qBound(60, availH / 5, 120);
 }
 

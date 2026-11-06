@@ -2,14 +2,12 @@
 #include "OBSBasic.hpp"
 #include "qt-wrappers.hpp"
 
-#ifdef __ANDROID__
+#include "utility/OBSAndroidDisplay.hpp" // 3-4 探针日志（logcat tag OBS-display）
+#include <functional>
 #include <QGridLayout> // 3-4 16:10 校形：控制按钮改两列
-#include <QTimer> // 3-4：☰ 菜单里第二层 exec() 要推到下一轮事件循环
 #include <QPainter> // 3-4：☰ 图标自己画（设备字体没有 U+2630）
 #include <QPixmap>
-#include "OBSAndroidDisplay.hpp" // 3-4 探针日志（logcat tag OBS-display）
-#include <functional>
-#endif
+#include <QTimer> // 3-4：☰ 菜单里第二层 exec() 要推到下一轮事件循环
 
 #include "moc_OBSBasicControls.cpp"
 

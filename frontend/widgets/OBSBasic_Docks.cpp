@@ -22,7 +22,7 @@
 #include <qt-wrappers.hpp>
 
 #ifdef __ANDROID__
-#include "OBSAndroidDisplay.hpp"
+#include "utility/OBSAndroidDisplay.hpp"
 #include <QTimer>
 #include <QToolBar>
 

@@ -33,9 +33,7 @@
 
 #include <qt-wrappers.hpp>
 
-#ifdef __ANDROID__
 #include "OBSBasicControls.hpp" // P-17-e：主界面那颗前后置按钮挂在 controlsDock 里
-#endif
 
 void OBSBasic::copyActionsDynamicProperties()
 {

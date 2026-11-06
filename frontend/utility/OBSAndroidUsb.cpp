@@ -1,12 +1,29 @@
+/******************************************************************************
+    Copyright (C) 2026 OBS for Android port contributors
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+******************************************************************************/
+
 #include "OBSAndroidUsb.hpp"
 
-#ifdef __ANDROID__
 
-#include <obs.h> // obs_android_set_usb_host / struct obs_android_usb_device
+#include "obs-android.h" // obs_android_set_usb_host / struct obs_android_usb_device
+#include <obs.h>
 
 #include <QByteArray>
-#include <QStringList>
 #include <QJniObject>
+#include <QStringList>
 
 #include <cstring>
 
@@ -21,8 +38,9 @@ static const char kUsbHostClass[] = "com/obsproject/studio/ObsUsbHost";
 
 static QString jstringToQString(const QJniObject &s)
 {
-	if (!s.isValid())
+	if (!s.isValid()) {
 		return QString();
+	}
 	return s.toString();
 }
 
@@ -36,16 +54,18 @@ static QJniObject appContext()
 	for (const char *g : getters) {
 		ctx = QJniObject::callStaticObjectMethod("org/qtproject/qt/android/QtNative", g,
 							 "()Landroid/content/Context;");
-		if (ctx.isValid())
+		if (ctx.isValid()) {
 			break;
+		}
 	}
 	return ctx;
 }
 
 static void copyField(char *dst, size_t dstLen, const QString &src)
 {
-	if (!dst || dstLen == 0)
+	if (!dst || dstLen == 0) {
 		return;
+	}
 	const QByteArray utf8 = src.toUtf8();
 	const size_t cap = dstLen - 1;
 	const size_t n = (size_t)utf8.size() < cap ? (size_t)utf8.size() : cap;
@@ -59,8 +79,9 @@ static int jbGetDevices(void *param, struct obs_android_usb_device *out, int max
 {
 	(void)param;
 	const QJniObject snap = QJniObject::callStaticObjectMethod(kUsbHostClass, "snapshot", "()Ljava/lang/String;");
-	if (!snap.isValid())
+	if (!snap.isValid()) {
 		return -1;
+	}
 
 	const QString joined = jstringToQString(snap);
 	if (joined.isEmpty())
@@ -69,8 +90,9 @@ static int jbGetDevices(void *param, struct obs_android_usb_device *out, int max
 	const QStringList entries = joined.split(QLatin1Char(';'), Qt::SkipEmptyParts);
 	int n = 0;
 	for (const QString &e : entries) {
-		if (n >= max)
+		if (n >= max) {
 			break;
+		}
 		const QStringList f = e.split(QLatin1Char('|'));
 		if (f.size() < 3)
 			continue; // 协议被 Java 侧改坏了，宁可不给也不猜
@@ -119,8 +141,9 @@ bool obsAndroidUsbRegisterBus(QString *detail)
 	 * 这个 bool 兜住，日志也只打一遍。 */
 	static bool s_bus_registered = false;
 	if (s_bus_registered) {
-		if (detail)
+		if (detail) {
 			*detail = QStringLiteral("USB 总线已注册过（幂等跳过）");
+		}
 		return true;
 	}
 	s_bus_registered = true;
@@ -128,8 +151,9 @@ bool obsAndroidUsbRegisterBus(QString *detail)
 	const QJniObject ctx = appContext();
 	if (!ctx.isValid()) {
 		const QString line = QStringLiteral("USB 宿主未安装：QtNative.getContext()/activity() 都拿不到 Context");
-		if (detail)
+		if (detail) {
 			*detail = line;
+		}
 		blog(LOG_WARNING, "OBSAndroidUsb[Android]: %s", line.toUtf8().constData());
 		return false;
 	}
@@ -138,8 +162,9 @@ bool obsAndroidUsbRegisterBus(QString *detail)
 								   "(Landroid/content/Context;)Z", ctx.object<jobject>());
 	if (!ok) {
 		const QString line = QStringLiteral("ObsUsbHost.install() 返回 false —— 该设备没有 USB Host 服务？");
-		if (detail)
+		if (detail) {
 			*detail = line;
+		}
 		blog(LOG_WARNING, "OBSAndroidUsb[Android]: %s", line.toUtf8().constData());
 		return false;
 	}
@@ -161,10 +186,9 @@ bool obsAndroidUsbRegisterBus(QString *detail)
 				     .arg(obs_android_usb_ready() ? 1 : 0)
 				     .arg(n)
 				     .arg(lines.isEmpty() ? QStringLiteral("") : QStringLiteral("：") + lines.join(QStringLiteral("，")));
-	if (detail)
+	if (detail) {
 		*detail = line;
+	}
 	blog(n < 0 ? LOG_WARNING : LOG_INFO, "OBSAndroidUsb[Android]: %s", line.toUtf8().constData());
 	return true;
 }
-
-#endif // __ANDROID__

@@ -8,7 +8,7 @@
 #include <utility/YoutubeApiWrappers.hpp>
 #endif
 #include <widgets/OBSBasic.hpp>
-#include <widgets/OBSAndroidDisplay.hpp> // P-2 服务列表探针（logcat tag OBS-display）
+#include <utility/OBSAndroidDisplay.hpp> // P-2 服务列表探针（logcat tag OBS-display）
 
 #include <qt-wrappers.hpp>
 

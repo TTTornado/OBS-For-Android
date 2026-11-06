@@ -23,10 +23,8 @@
 #include <utility/CrashHandler.hpp>
 #include <utility/OBSEventFilter.hpp>
 #include <utility/OBSProxyStyle.hpp>
-#ifdef __ANDROID__
 #include <utility/android-window-fit.hpp>
 #include <utility/AndroidRuntimeBootstrap.hpp> /* EnsureAndroidPluginBinaries()：装载前解插件 .so */
-#endif
 #if defined(_WIN32) || defined(ENABLE_SPARKLE_UPDATER)
 #include <utility/models/branches.hpp>
 #endif
@@ -48,19 +46,17 @@
 #include <QSocketNotifier>
 #endif
 
-#ifdef __ANDROID__
-#include "widgets/OBSAndroidDisplay.hpp" // 3-3 模态遮挡：obsAndroidDisplaySetVisible
-#include "widgets/OBSAndroidPath.hpp" // 3-4：openUrl(本地路径) 的 Android 替代
-#include <QAbstractScrollArea> // 3-4 触摸：长按坐标要按 viewport 系给（itemAt/exec 都吃这个系）
+#include "utility/OBSAndroidDisplay.hpp" // 3-3 模态遮挡：obsAndroidDisplaySetVisible
+#include "utility/OBSAndroidPath.hpp" // 3-4：openUrl(本地路径) 的 Android 替代
 #include <QAbstractItemView> // 单指滑动：item view 要换 LeftMouseButtonGesture（见 enableFlickScroll）
+#include <QAbstractScrollArea> // 3-4 触摸：长按坐标要按 viewport 系给（itemAt/exec 都吃这个系）
 #include <QComboBox> // P-8 触摸：组合框弹层探针要认出按下落在的是不是 QComboBox
 #include <QContextMenuEvent> // 3-4 触摸：长按合成右键
-#include <QGestureEvent> // P-8 探针：认出 TapAndHold 手势
 #include <QElapsedTimer>
-#include <QTimer>
+#include <QGestureEvent> // P-8 探针：认出 TapAndHold 手势
 #include <QScreen> // B 方案：顶层对话框压进 availableGeometry 时要完整类型
 #include <QScroller> // 单指滑动滚动（QScroller）
-#endif
+#include <QTimer>
 
 #include <chrono>
 #include <sstream>
@@ -1288,12 +1284,12 @@ protected:
 			target_ = pw;
 			pressGlobal_ = static_cast<QMouseEvent *>(ev)->globalPosition().toPoint();
 			armed_ = false;
-			timer_.start(HOLD_MS);
+			timer_.start(kHoldMs);
 			return false;
 		}
 		case QEvent::MouseMove: {
 			QMouseEvent *me = static_cast<QMouseEvent *>(ev);
-			if ((me->globalPosition().toPoint() - pressGlobal_).manhattanLength() > MOVE_SLOP) {
+			if ((me->globalPosition().toPoint() - pressGlobal_).manhattanLength() > kMoveSlop) {
 				timer_.stop(); /* 这是拖动/滚动，不是长按 */
 				armed_ = false;
 			}
@@ -1316,8 +1312,8 @@ protected:
 	}
 
 private:
-	static constexpr int HOLD_MS = 500;
-	static constexpr int MOVE_SLOP = 24;
+	static constexpr int kHoldMs = 500;
+	static constexpr int kMoveSlop = 24;
 
 	/* 返回值 = "这发长按真的立起过菜单吗"。松手分支用它决定吞不吞这发松手。
 	 *

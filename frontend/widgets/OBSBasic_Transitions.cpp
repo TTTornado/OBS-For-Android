@@ -17,9 +17,7 @@
 
 #include "OBSBasic.hpp"
 
-#ifdef __ANDROID__
-#include "OBSAndroidDisplay.hpp" // P-1 默认转场建成探针（logcat tag OBS-display）
-#endif
+#include "utility/OBSAndroidDisplay.hpp" // P-1 默认转场建成探针（logcat tag OBS-display）
 
 #include <algorithm>
 

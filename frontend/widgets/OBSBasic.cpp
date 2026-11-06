@@ -25,15 +25,13 @@
 #include "OBSBasicStats.hpp"
 #include "plugin-manager/PluginManager.hpp"
 
-#ifdef __ANDROID__
-#include "OBSAndroidDisplay.hpp" // 3-4 校形探针日志（logcat tag OBS-display）
-#include "OBSAndroidKeepAlive.hpp"
-#include "OBSAndroidPermissions.hpp"
-#include "OBSAndroidUsb.hpp" // USB host 总线注册（logcat tag OBS-usb）
+#include "utility/OBSAndroidDisplay.hpp" // 3-4 校形探针日志（logcat tag OBS-display）
+#include "utility/OBSAndroidKeepAlive.hpp"
+#include "utility/OBSAndroidPermissions.hpp"
+#include "utility/OBSAndroidUsb.hpp" // USB host 总线注册（logcat tag OBS-usb）
 #include <QListView> // 3-4 命中区：列表行高
 #include <QToolBar> // 3-4 命中区：场景/源两排工具按钮
 #include <QToolButton>
-#endif
 
 #include <obs-module.h>
 

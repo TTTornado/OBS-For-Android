@@ -27,9 +27,7 @@
 #include <QDesktopServices>
 #include <QFileInfo>
 
-#ifdef __ANDROID__
-#include "OBSAndroidPath.hpp"
-#endif
+#include "utility/OBSAndroidPath.hpp"
 
 void OBSBasic::on_actionShow_Recordings_triggered()
 {

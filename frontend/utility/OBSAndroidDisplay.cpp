@@ -1,17 +1,33 @@
+/******************************************************************************
+    Copyright (C) 2026 OBS for Android port contributors
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+******************************************************************************/
+
 #include "OBSAndroidDisplay.hpp"
 
-#ifdef __ANDROID__
 
+#include <QApplication>
 #include <QJniEnvironment>
 #include <QJniObject>
-#include <QPointer>
-#include <QApplication>
 #include <QMouseEvent>
+#include <QPointer>
 #include <QWidget>
 
+#include <android/log.h>
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
-#include <android/log.h>
 #include <sys/system_properties.h>
 
 #include <cstdarg>
@@ -35,8 +51,9 @@ static QJniObject hostActivity()
 
 static QString jstringToQString(const QJniObject &s)
 {
-	if (!s.isValid())
+	if (!s.isValid()) {
 		return QString();
+	}
 	return s.toString();
 }
 
@@ -72,8 +89,9 @@ bool obsAndroidProbeEnabled()
 	 * 比每次打日志都读一次系统属性便宜得多）。 */
 	static const bool enabled = [] {
 		char value[PROP_VALUE_MAX] = {0};
-		if (__system_property_get("debug.obs.probe", value) <= 0)
+		if (__system_property_get("debug.obs.probe", value) <= 0) {
 			return false;
+		}
 		switch (value[0]) {
 		case '1':
 		case 'y':
@@ -130,8 +148,9 @@ static std::function<void(int)> g_onParkedEvent;
 
 static void postSurfaceEventTo(QObject *ctx, const std::function<void(int)> &fn, int what)
 {
-	if (!ctx || !fn)
+	if (!ctx || !fn) {
 		return;
+	}
 	/* 投递到 ctx 所属线程（Qt 主线程）；ctx 若在事件跑之前析构，Qt 会丢弃挂它的排队调用。 */
 	QMetaObject::invokeMethod(ctx, [fn, what] { fn(what); }, Qt::QueuedConnection);
 }
@@ -142,8 +161,9 @@ static void postSurfaceEvent(int what)
 	std::function<void(int)> fn;
 	{
 		std::lock_guard<std::mutex> lk(g_lifecycleMutex);
-		if (!g_lifecycleCtx)
+		if (!g_lifecycleCtx) {
 			return;
+		}
 		ctx = g_lifecycleCtx.data();
 		fn = g_onSurfaceEvent;
 	}
@@ -166,15 +186,17 @@ static void jniTouch(JNIEnv *, jclass, jint action, jfloat xPx, jfloat yPx)
 		std::lock_guard<std::mutex> lk(g_lifecycleMutex);
 		ctx = g_lifecycleCtx;
 	}
-	if (!ctx)
+	if (!ctx) {
 		return;
+	}
 
 	QMetaObject::invokeMethod(
 		ctx.data(),
 		[ctx, action, xPx, yPx] {
 			QWidget *w = qobject_cast<QWidget *>(ctx.data());
-			if (!w)
+			if (!w) {
 				return;
+			}
 			const qreal dpr = w->devicePixelRatioF();
 			const QPointF local(xPx / dpr, yPx / dpr);
 
@@ -285,8 +307,9 @@ static bool claimCommon(QObject *ctx, std::function<void(int)> onSurfaceEvent, b
 		g_onSurfaceEvent = std::move(onSurfaceEvent);
 	}
 
-	if (revokedCtx)
+	if (revokedCtx) {
 		postSurfaceEventTo(revokedCtx.data(), revokedFn, ObsAndroidSurfaceRevoked);
+	}
 
 	obsAndroidDisplayLog("B-8 claimLifecycle ctx=%p（%s）", (void *)ctx, preempt ? "抢占接管" : "已认领");
 	return true;
@@ -363,8 +386,9 @@ bool obsAndroidDisplayAttach(int x, int y, int w, int h, QString *detail)
 
 	const QJniObject act = hostActivity();
 	if (!act.isValid()) {
-		if (detail)
+		if (detail) {
 			*detail = QStringLiteral("拿不到 QtNative.activity() —— 预览面不会建起来");
+		}
 		return false;
 	}
 
@@ -383,8 +407,9 @@ bool obsAndroidDisplayUpdateRect(int x, int y, int w, int h, QString *detail)
 {
 	const QJniObject act = hostActivity();
 	if (!act.isValid()) {
-		if (detail)
+		if (detail) {
 			*detail = QStringLiteral("updateRect: 拿不到 QtNative.activity()");
+		}
 		return false;
 	}
 
@@ -400,16 +425,18 @@ bool obsAndroidDisplayUpdateRect(int x, int y, int w, int h, QString *detail)
 
 bool obsAndroidDisplayAcquire(ObsDisplaySurface *out, QString *detail)
 {
-	if (!out)
+	if (!out) {
 		return false;
+	}
 
 	*out = ObsDisplaySurface{};
 
 	const QJniObject surface =
 		QJniObject::callStaticObjectMethod(kDisplayHostClass, "getSurface", "()Landroid/view/Surface;");
 	if (!surface.isValid()) {
-		if (detail)
+		if (detail) {
 			*detail = QStringLiteral("ObsDisplayHost.getSurface() 返回 null —— 没 attach 或已经 detach");
+		}
 		return false;
 	}
 
@@ -419,15 +446,17 @@ bool obsAndroidDisplayAcquire(ObsDisplaySurface *out, QString *detail)
 	 * 显式 obsAndroidDisplayRelease 还一次，不能省。 */
 	QJniEnvironment env;
 	if (!env.isValid()) {
-		if (detail)
+		if (detail) {
 			*detail = QStringLiteral("当前线程没有可用的 JNIEnv（QJniEnvironment::isValid=false）");
+		}
 		return false;
 	}
 
 	ANativeWindow *window = ANativeWindow_fromSurface(env.jniEnv(), surface.object<jobject>());
 	if (!window) {
-		if (detail)
+		if (detail) {
 			*detail = QStringLiteral("ANativeWindow_fromSurface 返回 null（Surface 无效？）");
+		}
 		return false;
 	}
 
@@ -452,8 +481,9 @@ bool obsAndroidDisplayAcquire(ObsDisplaySurface *out, QString *detail)
 
 void obsAndroidDisplayRelease(void *window)
 {
-	if (window)
+	if (window) {
 		ANativeWindow_release((ANativeWindow *)window);
+	}
 }
 
 bool obsAndroidDisplayDetach(QString *detail)
@@ -468,8 +498,9 @@ bool obsAndroidDisplayDetach(QString *detail)
 QString obsAndroidDisplayStatus()
 {
 	const QString desc = callString("describe");
-	if (!desc.isEmpty())
+	if (!desc.isEmpty()) {
 		return desc;
+	}
 
 	/* describe() 拿不到时（静态方法没调到 / 类没进 APK）用计数器兜一层 —— 全 0 且总线没接通
 	 * 才是"桥没通"，和"接通了但一个 surface 回调都没发过"是两回事。 */
@@ -479,5 +510,3 @@ QString obsAndroidDisplayStatus()
 		.arg(callInt("changedCount"))
 		.arg(callInt("destroyedCount"));
 }
-
-#endif // __ANDROID__

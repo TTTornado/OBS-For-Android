@@ -28,9 +28,7 @@
 #include <docks/YouTubeAppDock.hpp>
 #endif
 #include <utility/audio-encoders.hpp>
-#ifdef __ANDROID__
 #include <utility/android-window-fit.hpp>
-#endif
 #include <utility/BaseLexer.hpp>
 #include <utility/FFmpegCodec.hpp>
 #include <utility/FFmpegFormat.hpp>

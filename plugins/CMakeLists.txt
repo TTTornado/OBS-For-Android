@@ -37,18 +37,19 @@ if(OS_ANDROID)
   #                       五项 —— camera2ndk 是 NDK 桩库，运行时由 linker 从系统分区取真身，
   #                       所以 APK 里不多一枚 .so，打包账不变。28 条 UNDEF 里 OBS 域**未解析 0 条**
   #                       （"等 dlopen 才炸"那类坑静态排掉），Camera2 侧 7 条 ACameraManager_*/
-  #                       ACameraMetadata_* 由桩库提供；装载清单 android-plugin-modules.h 已含 "android-camera"。
+  #                       ACameraMetadata_* 由桩库提供；模块名进 OBS_MODULES_ENABLED 即可，
+  #                       装载由 loadPlugins() 扫目录完成，不需要额外的编译期清单。
   #   android-screen   —— P-18：屏幕采集源（MediaProjection）。依赖面与相机同一档：只链 OBS::libobs
   #                       + 裸名 mediandk（AImageReader_* / AImage_* 都在 libmediandk.so 那枚桩库里，
   #                       运行时由 linker 从系统分区取真身，APK 里不多一枚 .so）。
   #                       **不链 android**：这一路确实要用 ANativeWindow_toSurface，但那一步在
   #                       前端 OBSAndroidPermissions.cpp（前端本来就 link libandroid）—— 插件只把
   #                       AImageReader_getWindow 拿到的指针当不透明 void* 递过总线。
-  #                       装载清单不需要在本文件之外再改一处：SAFE_MODULES 是 cmake 全局属性
+  #                       模块名不需要在本文件之外再改一处：SAFE_MODULES 由 cmake 全局属性
   #                       OBS_MODULES_ENABLED 拼出来的（frontend/CMakeLists.txt:125-127），
   #                       而 obs_add_safe_module / obs_add_core_module 读的就是它
   #                       （frontend/widgets/OBSBasic.cpp:225-259）⇒ 下面这一行同时进构建、
-  #                       进白名单、进核心装载清单，三处一本账，不会漏一处。
+  #                       进白名单、进 core 清单、进插件数据资源清单，三处一本账，不会漏一处。
   #   obs-transitions  —— 阶段 4 P-1：InitDefaultTransitions 需要的转场源（含 fade/slide/
   #                       swipe/luma_wipe/stinger）。它只链 OBS::libobs，但 .so 之外的
   #                       data/*.effect 必须随 APK 走"Qt 资源 → 私有目录"那条路才找得到

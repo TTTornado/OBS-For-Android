@@ -47,9 +47,7 @@
 
 #include <qt-wrappers.hpp>
 
-#ifdef __ANDROID__
-#include "OBSAndroidPath.hpp" // 3-4：openUrl(本地路径) 的 Android 替代
-#endif
+#include "utility/OBSAndroidPath.hpp" // 3-4：openUrl(本地路径) 的 Android 替代
 
 #include <nlohmann/json.hpp>
 #include <QDesktopServices>

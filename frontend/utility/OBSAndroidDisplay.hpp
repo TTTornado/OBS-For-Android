@@ -1,3 +1,20 @@
+/******************************************************************************
+    Copyright (C) 2026 OBS for Android port contributors
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+******************************************************************************/
+
 // 路线 B（plan.md §五 3-2③ B-1）：预览控件 → Java SurfaceView → ANativeWindow → gs_init_data
 // 的前端侧宿主桥。与 android-shell/obs_display_host.{h,cpp} 同源，两点差别：
 //   * 目标类换成前端包 com/obsproject/studio/ObsDisplayHost；
@@ -5,10 +22,10 @@
 //     预览面必须精确盖住控件那一块，才算"面里 OBS 画面、面外还是 Qt"。
 #pragma once
 
-#include <QObject>
-#include <QString>
 #include <cstdint>
 #include <functional>
+#include <QObject>
+#include <QString>
 
 // 显示面的一次取证结果：三个来源的尺寸要能互相对上，才对得上才算"面真的在那儿"。
 struct ObsDisplaySurface {

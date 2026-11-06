@@ -1,3 +1,20 @@
+/******************************************************************************
+    Copyright (C) 2026 OBS for Android port contributors
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+******************************************************************************/
+
 // 3-4（plan.md §五）：桌面平台那 6 处 "QDesktopServices::openUrl(本地路径)" 的 Android 替代。
 // 实测依据（34l / emulator-5554 / 文件→显示录像，21:21:53）：Qt 会把本地路径换成
 // content://com.obsproject.studio.qtprovider/... 再发 ACTION_VIEW，系统把它派给了

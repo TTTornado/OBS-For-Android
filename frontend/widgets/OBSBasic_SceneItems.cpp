@@ -21,9 +21,7 @@
 #include "ColorSelect.hpp"
 #include "OBSProjector.hpp"
 
-#ifdef __ANDROID__
-#include "OBSAndroidDisplay.hpp" // 3-4 长按→右键探针（logcat tag OBS-display）
-#endif
+#include "utility/OBSAndroidDisplay.hpp" // 3-4 长按→右键探针（logcat tag OBS-display）
 
 #include <components/VolumeControl.hpp>
 #include <dialogs/NameDialog.hpp>

@@ -21,9 +21,7 @@
 #include <components/VisibilityItemWidget.hpp>
 #include <dialogs/NameDialog.hpp>
 #include <utility/AndroidMenuPos.hpp>
-#ifdef __ANDROID__
 #include <utility/android-window-fit.hpp>
-#endif
 #include <utility/display-helpers.hpp>
 #include <utility/item-widget-helpers.hpp>
 #include <widgets/OBSBasic.hpp>

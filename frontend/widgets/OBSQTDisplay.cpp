@@ -17,9 +17,7 @@
 #include <Windows.h>
 #endif
 
-#ifdef __ANDROID__
-#include "OBSAndroidDisplay.hpp"
-#endif
+#include "utility/OBSAndroidDisplay.hpp"
 
 #include "moc_OBSQTDisplay.cpp"
 

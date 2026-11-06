@@ -15,15 +15,15 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 ******************************************************************************/
 
-#include "PluginModuleLoader.hpp"
 #include "PluginManager.hpp"
+#include "PluginModuleLoader.hpp"
 
 #include <obs-module.h>
 #include <util/platform.h>
 
 /* 装载失败要打到 logcat：blog() 在 Android 上只写应用私有目录里的日志文件，
  * 而非 debuggable 的包 run-as 不进去 —— logcat 是唯一现场。 */
-#include "widgets/OBSAndroidDisplay.hpp"
+#include "utility/OBSAndroidDisplay.hpp"
 
 #include <cstdlib>
 #include <string>

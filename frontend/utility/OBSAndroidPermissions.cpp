@@ -1,6 +1,22 @@
+/******************************************************************************
+    Copyright (C) 2026 OBS for Android port contributors
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+******************************************************************************/
+
 #include "OBSAndroidPermissions.hpp"
 
-#ifdef __ANDROID__
 
 #include <QJniEnvironment>
 #include <QJniObject>
@@ -21,6 +37,7 @@
 #include <atomic>
 #include <string.h>
 
+#include "obs-android.h" // obs_android_{camera,screen}_* 总线注册
 #include <obs.hpp>
 
 /* Java 侧宿主（frontend/cmake/android/java/com/obsproject/studio/ObsPermissionHost.java） */
@@ -47,8 +64,9 @@ bool obsAndroidPermissionsRequestStartup(QString *detail)
 	const QJniObject act = hostActivity();
 	if (!act.isValid()) {
 		const QString line = QStringLiteral("权限申请没起来：拿不到 QtNative.activity()");
-		if (detail)
+		if (detail) {
 			*detail = line;
+		}
 		blog(LOG_WARNING, "OBSAndroidPermissions[Android]: %s", line.toUtf8().constData());
 		return false;
 	}
@@ -60,8 +78,9 @@ bool obsAndroidPermissionsRequestStartup(QString *detail)
 	const QString line = QStringLiteral("requestStartup=%1 %2")
 				     .arg(posted ? QStringLiteral("true") : QStringLiteral("false"))
 				     .arg(callDescribe(act));
-	if (detail)
+	if (detail) {
 		*detail = line;
+	}
 	blog(posted ? LOG_INFO : LOG_WARNING, "OBSAndroidPermissions[Android]: %s", line.toUtf8().constData());
 	return posted;
 }
@@ -163,8 +182,9 @@ void obsAndroidPermissionsRegisterCameraBus()
 	 * 但下面那次 connect 会**累加** —— 连接归 sender（App，活到进程结束）所有，
 	 * 没有 context 对象替我们解绑，所以只允许接一次。 */
 	static bool s_bus_registered = false;
-	if (s_bus_registered)
+	if (s_bus_registered) {
 		return;
+	}
 	s_bus_registered = true;
 
 	/* 先按"现在这一刻"的态起头，再挂信号：注册发生在建窗口之后（OBSBasic 构造里），
@@ -290,8 +310,9 @@ static bool screenDisplaySize(void *param, uint32_t *width, uint32_t *height, ui
 
 	*width = (uint32_t)w;
 	*height = (uint32_t)h;
-	if (dpi)
+	if (dpi) {
 		*dpi = (d > 0) ? (uint32_t)d : 0;
+	}
 	return true;
 }
 
@@ -342,8 +363,9 @@ static bool screenStartDisplay(void *param, void *native_window)
 	blog(LOG_INFO, "OBSAndroidPermissions[Android]: 接面 %dx%d@%ddpi 结果=%d Surface 引用类型=%d Java 侧=%s",
 	     (int)w, (int)h, (int)dpi, (int)ok, (int)ref_type, screenDescribe().toUtf8().constData());
 
-	if (ref_type == JNILocalRefType)
+	if (ref_type == JNILocalRefType) {
 		env->DeleteLocalRef(surface);
+	}
 	return ok != 0;
 }
 
@@ -388,8 +410,9 @@ static uint32_t g_audioScratchChannels = 0;
 
 static void audioReleaseScratch()
 {
-	if (!g_audioScratch)
+	if (!g_audioScratch) {
 		return;
+	}
 	QJniEnvironment env;
 	env->DeleteGlobalRef(g_audioScratch);
 	g_audioScratch = nullptr;
@@ -433,8 +456,9 @@ static bool screenStartAudio(void *param, uint32_t *sample_rate, uint32_t *chann
 	 * 幂等的第二发（或 Java 侧换了格式）走到这里：容量够就沿用，不够就销旧建新 —— 不销就是每换一次
 	 * 漏一枚 global ref。 */
 	const jsize need = (jsize)(rate * ch);
-	if (g_audioScratch && (g_audioScratchChannels != (uint32_t)ch || g_audioScratchShorts < need))
+	if (g_audioScratch && (g_audioScratchChannels != (uint32_t)ch || g_audioScratchShorts < need)) {
 		audioReleaseScratch();
+	}
 	if (!g_audioScratch) {
 		jshortArray fresh = env->NewShortArray(need);
 		if (!fresh) {
@@ -450,10 +474,12 @@ static bool screenStartAudio(void *param, uint32_t *sample_rate, uint32_t *chann
 		g_audioScratchChannels = (uint32_t)ch;
 	}
 
-	if (sample_rate)
+	if (sample_rate) {
 		*sample_rate = (uint32_t)rate;
-	if (channels)
+	}
+	if (channels) {
 		*channels = (uint32_t)ch;
+	}
 	blog(LOG_INFO, "OBSAndroidPermissions[Android]: 内录总线已接上 %dHz×%d（复用缓冲 %d 个 short ≈ 1 秒）",
 	     (int)rate, (int)ch, (int)g_audioScratchShorts);
 	return true;
@@ -480,8 +506,9 @@ static void screenStopAudio(void *param)
 static uint32_t screenReadAudio(void *param, int16_t *out, uint32_t max_frames)
 {
 	(void)param;
-	if (!out || max_frames == 0 || !g_audioScratch || g_audioScratchChannels == 0)
+	if (!out || max_frames == 0 || !g_audioScratch || g_audioScratchChannels == 0) {
 		return 0;
+	}
 
 	/* max_frames 是**帧**，缓冲的容量是**short**，夹之前先换算（Java 侧 drainAudio 自己也会按
 	 * out.length/声道数再夹一道，这里这一道是为了让 jint 那个窄化有界、且把"最多能拿回多少"说清楚）。 */
@@ -489,8 +516,9 @@ static uint32_t screenReadAudio(void *param, int16_t *out, uint32_t max_frames)
 	const jint want = (jint)((max_frames < cap_frames) ? max_frames : cap_frames);
 	const jint got = QJniObject::callStaticMethod<jint>(kProjectionClass, "drainAudio", "([SI)I",
 							    (jobject)g_audioScratch, want);
-	if (got <= 0)
+	if (got <= 0) {
 		return 0;
+	}
 
 	/* 这一条线程是插件自己 pthread_create 出来的原生线程，不在 JVM 的线程表里。
 	 * 判 env 有效再解引用：QJniEnvironment 拿不到 JNIEnv 时 jniEnv() 给空指针，
@@ -534,8 +562,9 @@ static const struct obs_android_screen_host kScreenHost = {
 void obsAndroidPermissionsRegisterScreenBus()
 {
 	static bool s_bus_registered = false;
-	if (s_bus_registered)
+	if (s_bus_registered) {
 		return;
+	}
 	s_bus_registered = true;
 
 	obs_android_set_screen_host(&kScreenHost);
@@ -577,5 +606,3 @@ void obsAndroidPermissionsRegisterScreenBus()
 						      : QStringLiteral("describe 调不到（类没进 APK？）"));
 	blog(LOG_INFO, "OBSAndroidPermissions[Android]: %s", line.toUtf8().constData());
 }
-
-#endif // __ANDROID__

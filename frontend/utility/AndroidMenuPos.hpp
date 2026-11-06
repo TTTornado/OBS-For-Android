@@ -1,3 +1,20 @@
+/******************************************************************************
+    Copyright (C) 2026 OBS for Android port contributors
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+******************************************************************************/
+
 // 3-4 触摸：弹出菜单/浮层的定位。上游一律写 `exec(QCursor::pos())`，Android 上照抄会弹到别处，
 // 两条都是实测出来的（不是推测）：
 //   ① 触摸**不更新**那个光标缓存 —— build 62 长按投影仪画面，菜单左上角落在**上一次** tap 的位置；
@@ -19,7 +36,7 @@
 #include <QWidget>
 
 #ifdef __ANDROID__
-#include "widgets/OBSAndroidDisplay.hpp"
+#include "utility/OBSAndroidDisplay.hpp"
 
 #include <QString>
 

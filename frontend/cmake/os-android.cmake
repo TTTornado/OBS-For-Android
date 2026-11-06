@@ -19,16 +19,16 @@ target_sources(
     # 路线 B（3-2③ B-1）：预览控件 → Java SurfaceView → ANativeWindow 的宿主桥。
     # 对应的 Java 侧在 cmake/android/java/com/obsproject/studio/ObsDisplayHost.java，
     # androiddeployqt 从 QT_ANDROID_PACKAGE_SOURCE_DIR 自动收 java/ 目录，不需要在这里列。
-    widgets/OBSAndroidDisplay.cpp
+    utility/OBSAndroidDisplay.cpp
     # 3-5：推流/录制期间的前台服务起停桥（Java 侧 cmake/android/java/.../ObsForegroundService.java）。
-    widgets/OBSAndroidKeepAlive.cpp
+    utility/OBSAndroidKeepAlive.cpp
     # 3-5：一期运行时权限申请（Java 侧 .../ObsPermissionHost.java）。
-    widgets/OBSAndroidPermissions.cpp
+    utility/OBSAndroidPermissions.cpp
     # USB host 总线（obs_android_usb_*）的前端注册（Java 侧 .../ObsUsbHost.java，
     # 自 android-shell/obs_usb_host.cpp 移植），给 android-capture 的 UVC 源用。
-    widgets/OBSAndroidUsb.cpp
+    utility/OBSAndroidUsb.cpp
     # 3-4：桌面 "openUrl(本地路径)" 的 Android 替代（显示路径 + 复制剪贴板）。
-    widgets/OBSAndroidPath.cpp
+    utility/OBSAndroidPath.cpp
 )
 
 target_compile_definitions(
@@ -126,9 +126,7 @@ qt_add_resources(
 # 与 libobs/obs-module.c 的 process_found_module 推出的 name 一致，data 目录按同名对上。
 get_property(_obs_plugin_modules GLOBAL PROPERTY OBS_MODULES_ENABLED)
 set(_obs_plugin_data_dirs "")
-set(OBS_ANDROID_PLUGIN_MODULE_ENTRIES "")
 foreach(_m IN LISTS _obs_plugin_modules)
-  string(APPEND OBS_ANDROID_PLUGIN_MODULE_ENTRIES "  \"${_m}\",\n")
   get_target_property(_m_src ${_m} SOURCE_DIR)
   if(_m_src AND EXISTS "${_m_src}/data")
     file(GLOB_RECURSE _m_files CONFIGURE_DEPENDS "${_m_src}/data/*")
@@ -146,14 +144,6 @@ foreach(_m IN LISTS _obs_plugin_modules)
 endforeach()
 list(JOIN _obs_plugin_data_dirs " " _obs_plugin_data_dirs)
 message(STATUS "P-1 打包：插件数据进 APK 资源 = ${_obs_plugin_data_dirs}（候选模块 ${_obs_plugin_modules}）")
-
-# 装载清单：OBSApp::loadAppModules() 的 Android 分支按这张表逐个裸名 dlopen（表的内容见模板注释）。
-# 没有它的话插件"进得了 APK、进不了 obs"—— 实测：只进白名单不装载时，转场列表为空、
-# channel 0 上没有转场源，切场景仍走 3-4 的直挂兜底分支。
-string(STRIP "${OBS_ANDROID_PLUGIN_MODULE_ENTRIES}" OBS_ANDROID_PLUGIN_MODULE_ENTRIES)
-configure_file(cmake/templates/android-plugin-modules.h.in android-plugin-modules.h NEWLINE_STYLE LF)
-list(LENGTH _obs_plugin_modules _obs_plugin_module_count)
-message(STATUS "P-1 装载：android-plugin-modules.h 生成，插件数=${_obs_plugin_module_count}")
 
 # 渲染后端不参与链接（obs_reset_video 时 os_dlopen("libobs-opengl")），所以只有列进
 # EXTRA_LIBS 才会被 androiddeployqt 打进 APK 的 lib/<abi>/。文件名本来就以 lib 开头，
