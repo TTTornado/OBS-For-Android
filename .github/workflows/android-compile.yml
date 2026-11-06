@@ -133,30 +133,6 @@ jobs:
           fi
           echo "NDK_ROOT=$SDK/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
 
-      # 每轮都完整跑：CI runner 是全新环境，既没有 prebuilt 也没有
-      # ~/deps-work/state，build.sh 的 stamp 不会命中。
-      # 整包 deps 缓存（actions/cache 存 prebuilt + stamp）已移除：它曾让
-      # master 的上游更新被旧产物挡住，也让「改了脚本但 key 不变」难排查。
-      # 依赖跟随 master，上游一提交就会进入这一轮的源码并完整重编。
-      - name: 下载依赖源码
-        run: bash android/deps-android/fetch.sh
-        env:
-          OBS_PROXY: ''          # CI 直连，不走代理
-
-      - name: 交叉编译依赖
-        run: bash android/deps-android/build.sh "${ABI}"
-        env:
-          NDK: ${{ env.NDK_ROOT }}
-          JOBS: 4
-
-      - name: 磁盘实况（依赖构建后）
-        run: |
-          echo "::group::df -h"
-          df -h /
-          echo "::endgroup::"
-          du -sh android/deps-android/prebuilt 2>/dev/null || true
-          du -sh "${HOME}/deps-work" 2>/dev/null || true
-
       # ccache：按「预处理后的源码 + 编译器 + 完整编译选项」的内容哈希复用 .o。
       # 改编译选项、换分支、改头文件都自动失效，不需要维护"哪些该重编"的清单。
       # key 带 github.sha，每轮存一份新的；restore-keys 前缀命中最近一份。
@@ -185,6 +161,32 @@ jobs:
             echo "CCACHE_MAXSIZE=3G"
             echo "CCACHE_COMPRESS=true"
           } >> "$GITHUB_ENV"
+
+      # 每轮都完整跑：CI runner 是全新环境，既没有 prebuilt 也没有
+      # ~/deps-work/state，build.sh 的 stamp 不会命中。
+      # 整包 deps 缓存（actions/cache 存 prebuilt + stamp）已移除：它曾让
+      # master 的上游更新被旧产物挡住，也让「改了脚本但 key 不变」难排查。
+      # 依赖跟随 master，上游一提交就会进入这一轮的源码并完整重编。
+      - name: 下载依赖源码
+        run: bash android/deps-android/fetch.sh
+        env:
+          OBS_PROXY: ''          # CI 直连，不走代理
+
+      - name: 交叉编译依赖
+        run: bash android/deps-android/build.sh "${ABI}"
+        env:
+          NDK: ${{ env.NDK_ROOT }}
+          JOBS: 4
+          USE_CCACHE: 1
+
+      - name: 磁盘实况（依赖构建后）
+        run: |
+          echo "::group::df -h"
+          df -h /
+          echo "::endgroup::"
+          du -sh android/deps-android/prebuilt 2>/dev/null || true
+          du -sh "${HOME}/deps-work" 2>/dev/null || true
+
       - name: 编译验证（libobs + GLES + 全部插件，跳过 Qt）
         run: |
           set -o pipefail
